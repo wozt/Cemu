@@ -50,4 +50,14 @@ void SubmitPadView(LatteTextureView* texView);
  */
 void ApplyInput();
 
+/*
+ * True while a connected client holds the given VPADController button.
+ *
+ * Merged with the local mapping rather than replacing it, so a pad or a
+ * keyboard on the host keeps working while someone plays from a phone.
+ * Takes a VPADController::ButtonId; anything the Wii U does not have is
+ * simply never reported.
+ */
+bool IsButtonHeld(int vpadButtonId);
+
 }

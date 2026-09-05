@@ -1,4 +1,8 @@
 #include "input/emulated/VPADController.h"
+
+#ifdef BOTTOM_SCREEN_ENABLED
+#include "Cafe/HW/Latte/Core/BottomScreenBridge.h"
+#endif
 #include "input/api/Controller.h"
 #ifdef HAS_SDL
 #include "input/api/SDL/SDLController.h"
@@ -57,7 +61,13 @@ void VPADController::VPADRead(VPADStatus_t& status, const BtnRepeat& repeat)
 		if (is_axis_mapping(i))
 			continue;
 
+#ifdef BOTTOM_SCREEN_ENABLED
+		// Merged, not replaced: a pad or keyboard on the host keeps working
+		// while someone else plays from a phone.
+		if (is_mapping_down(i) || BottomScreen::IsButtonHeld(i))
+#else
 		if (is_mapping_down(i))
+#endif
 		{
 			const uint32 value = get_emulated_button_flag(i);
 			if (value == 0)

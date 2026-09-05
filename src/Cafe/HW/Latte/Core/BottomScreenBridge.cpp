@@ -29,6 +29,9 @@ namespace
     bool      g_tried  = false;
     int       g_width  = 0;
     int       g_height = 0;
+    /* Buttons held by clients, indexed by VPADController::ButtonId.
+     * Written once per frame by ApplyInput, read by VPADController. */
+    uint64    g_held = 0;
     std::vector<uint8> g_pixels;
 
     /*
@@ -196,7 +199,23 @@ void ApplyInput()
         instance.m_pad_touch.left_down = false;
     }
 
-    (void)buttonFor;   // buttons are wired in the next step
+    uint64 held = 0;
+    for (int b = 1; b <= 15; b++)
+    {
+        if (!(in.buttons & (1u << (b - 1))))
+            continue;
+        const uint32 id = buttonFor(b);
+        if (id != 0 && id < 64)
+            held |= (1ull << id);
+    }
+    g_held = held;
+}
+
+bool IsButtonHeld(int vpadButtonId)
+{
+    if (!g_server || vpadButtonId <= 0 || vpadButtonId >= 64)
+        return false;
+    return (g_held & (1ull << vpadButtonId)) != 0;
 }
 
 }
