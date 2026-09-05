@@ -119,6 +119,8 @@ add_library(CemuCafe
   HW/Latte/Core/LatteQuery.cpp
   HW/Latte/Core/LatteQueryObject.h
   HW/Latte/Core/LatteRenderTarget.cpp
+  HW/Latte/Core/BottomScreenBridge.cpp
+  HW/Latte/Core/BottomScreenBridge.h
   HW/Latte/Core/LatteRingBuffer.cpp
   HW/Latte/Core/LatteRingBuffer.h
   HW/Latte/Core/LatteShaderAssembly.h
@@ -681,4 +683,50 @@ endif()
 
 if(WIN32)
 	target_link_libraries(CemuCafe PRIVATE iphlpapi)
+endif()
+
+
+# --- bottom_screen_server -------------------------------------------
+#
+# Streams the GamePad screen to a phone or a Switch homebrew. The shared
+# code is plain C and lives outside this repository, in the
+# bottom_screen_server tree this fork sits inside; only
+# BottomScreenBridge.cpp is part of Cemu itself.
+#
+# Optional on purpose: without the sibling directory the fork builds
+# exactly like upstream, so a bisect or a clean checkout is never
+# blocked on it.
+
+set(BOTTOM_SCREEN_DIR "${CMAKE_SOURCE_DIR}/../.." CACHE PATH
+    "Path to the bottom_screen_server sources")
+
+if (EXISTS "${BOTTOM_SCREEN_DIR}/bs_server.c")
+    find_package(PkgConfig REQUIRED)
+    pkg_check_modules(BOTTOMSCREEN_FFMPEG REQUIRED libavcodec libavutil libswscale)
+
+    target_sources(CemuCafe PRIVATE
+        "${BOTTOM_SCREEN_DIR}/bs_server.c"
+        "${BOTTOM_SCREEN_DIR}/bs_encoder.c"
+        "${BOTTOM_SCREEN_DIR}/bs_net.c"
+        "${BOTTOM_SCREEN_DIR}/bs_mailbox.c"
+    )
+    # The target uses a C++ precompiled header, and CMake applies it to
+    # every source in the target. Handing a C++ PCH to the C compiler
+    # fails on the first C++ include it meets, so the C sources opt out.
+    set_source_files_properties(
+        "${BOTTOM_SCREEN_DIR}/bs_server.c"
+        "${BOTTOM_SCREEN_DIR}/bs_encoder.c"
+        "${BOTTOM_SCREEN_DIR}/bs_net.c"
+        "${BOTTOM_SCREEN_DIR}/bs_mailbox.c"
+        PROPERTIES SKIP_PRECOMPILE_HEADERS ON)
+
+    target_include_directories(CemuCafe PRIVATE
+        "${BOTTOM_SCREEN_DIR}" ${BOTTOMSCREEN_FFMPEG_INCLUDE_DIRS})
+    target_link_libraries(CemuCafe PRIVATE
+        ${BOTTOMSCREEN_FFMPEG_LIBRARIES} pthread)
+    target_compile_definitions(CemuCafe PRIVATE BOTTOM_SCREEN_ENABLED)
+
+    message(STATUS "bottom_screen_server: enabled for Cemu (${BOTTOM_SCREEN_DIR})")
+else()
+    message(STATUS "bottom_screen_server: not found, building Cemu without it")
 endif()

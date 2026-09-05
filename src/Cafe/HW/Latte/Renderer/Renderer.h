@@ -73,6 +73,18 @@ public:
 
 	virtual void HandleScreenshotRequest(LatteTextureView* texView, bool padView){}
 
+	/*
+	 * Reads a rendered view back off the GPU as tightly packed RGBA, for
+	 * bottom_screen_server. Sized by the caller from the texture itself,
+	 * because that follows the internal resolution rather than the
+	 * GamePad's own 854x480.
+	 *
+	 * Returns false on a backend that cannot do it yet, so the caller can
+	 * say so once instead of streaming nothing in silence.
+	 */
+	virtual bool ReadbackViewRGBA(LatteTextureView* texView, std::vector<uint8>& out,
+	                              sint32& width, sint32& height) { return false; }
+
 	virtual void DrawBackbufferQuad(LatteTextureView* texView, RendererOutputShader* shader, bool useLinearTexFilter,
 												sint32 imageX, sint32 imageY, sint32 imageWidth, sint32 imageHeight,
 												bool padView, bool clearBackground) = 0;

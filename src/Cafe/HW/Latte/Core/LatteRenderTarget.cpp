@@ -17,6 +17,10 @@
 #include "input/InputManager.h"
 #include "Cafe/OS/libs/swkbd/swkbd.h"
 
+#ifdef BOTTOM_SCREEN_ENABLED
+#include "Cafe/HW/Latte/Core/BottomScreenBridge.h"
+#endif
+
 uint32 prevScissorX = 0;
 uint32 prevScissorY = 0;
 uint32 prevScissorWidth = 0;
@@ -963,6 +967,18 @@ void LatteRenderTarget_copyToBackbuffer(LatteTextureView* textureView, bool isPa
 	cemu_assert(shader);
 	g_renderer->DrawBackbufferQuad(textureView, shader, filter==LatteTextureView::MagFilter::kLinear, imageX, imageY, imageWidth, imageHeight, isPadView, clearBackground);
 	g_renderer->HandleScreenshotRequest(textureView, isPadView);
+
+#ifdef BOTTOM_SCREEN_ENABLED
+	// The GamePad image has just been drawn and Cemu has finished with the
+	// texture, so this is the one moment it is both complete and still
+	// bound. Reading it back only copies; the encoding happens on the
+	// server's own thread and never holds the render thread up.
+	if (isPadView)
+	{
+		BottomScreen::SubmitPadView(textureView);
+		BottomScreen::ApplyInput();
+	}
+#endif
 	if (!g_renderer->ImguiBegin(!isPadView))
 		return;
 	swkbd_render(!isPadView);

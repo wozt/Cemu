@@ -419,6 +419,14 @@ struct CemuConfig
 #undef DISABLE_SCREENSAVER_DEFAULT
 	ConfigValue<bool> play_boot_sound{false};
 
+	// bottom_screen_server: streams the GamePad screen to a phone or a
+	// Switch homebrew. On by default -- it costs nothing until a client
+	// connects, and a feature nobody can find is a feature nobody uses.
+	// The port is a first choice: if it is taken the server walks upwards
+	// until it finds a free one, so several emulators can run at once.
+	ConfigValue<bool> bottom_screen_enabled{true};
+	ConfigValue<uint16> bottom_screen_port{5090};
+
 	std::vector<std::string> game_paths;
 	std::mutex game_cache_entries_mutex;
 	std::vector<GameEntry> game_cache_entries;

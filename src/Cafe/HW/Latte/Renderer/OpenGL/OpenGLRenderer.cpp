@@ -514,6 +514,31 @@ void OpenGLRenderer::ClearColorbuffer(bool padView)
 }
 
 
+bool OpenGLRenderer::ReadbackViewRGBA(LatteTextureView* texView, std::vector<uint8>& out,
+                                      sint32& width, sint32& height)
+{
+	if (!texView)
+		return false;
+
+	// Same shape as the screenshot path just below, but RGBA rather than
+	// RGB: the encoder takes 32-bit pixels, and converting a whole frame
+	// per frame to save a byte per pixel is a poor trade.
+	glBindBuffer(GL_PIXEL_PACK_BUFFER, 0);
+	texture_bindAndActivate(texView, 0);
+	glGetTexLevelParameteriv(GL_TEXTURE_2D, 0, GL_TEXTURE_WIDTH, &width);
+	glGetTexLevelParameteriv(GL_TEXTURE_2D, 0, GL_TEXTURE_HEIGHT, &height);
+	if (width <= 0 || height <= 0)
+	{
+		texture_bindAndActivate(nullptr, 0);
+		return false;
+	}
+	glPixelStorei(GL_PACK_ALIGNMENT, 1);
+	out.resize((size_t)width * height * 4);
+	glGetTexImage(GL_TEXTURE_2D, 0, GL_RGBA, GL_UNSIGNED_BYTE, out.data());
+	texture_bindAndActivate(nullptr, 0);
+	return true;
+}
+
 void OpenGLRenderer::HandleScreenshotRequest(LatteTextureView* texView, bool padView)
 {
 	if(!m_screenshot_requested && m_screenshot_state == ScreenshotState::None)

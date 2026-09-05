@@ -256,6 +256,18 @@ wxPanel* GeneralSettings2::AddGeneralPage(wxNotebook* notebook)
 			third_row->Add(m_play_boot_sound, 0, botflag, 5);
 			CountRowElement();
 
+			// bottom_screen_server
+			m_bottom_screen_enabled = new wxCheckBox(box, wxID_ANY, _("Stream GamePad screen"));
+			m_bottom_screen_enabled->SetToolTip(_("Serves the GamePad screen to a phone or a Switch homebrew over the network, and takes their touch and buttons back. Costs nothing until a client connects."));
+			third_row->Add(m_bottom_screen_enabled, 0, botflag, 5);
+			CountRowElement();
+
+			third_row->Add(new wxStaticText(box, wxID_ANY, _("Port")), 0, wxALIGN_CENTER_VERTICAL | wxALL, 5);
+			m_bottom_screen_port = new wxSpinCtrl(box, wxID_ANY, "5090", wxDefaultPosition, wxDefaultSize, 0, 1024, 65535);
+			m_bottom_screen_port->SetToolTip(_("First port to try. If it is already taken the server walks upwards until it finds a free one, so several emulators can run at once."));
+			third_row->Add(m_bottom_screen_port, 0, botflag, 5);
+			CountRowElement();
+
 			m_auto_update = new wxCheckBox(box, wxID_ANY, _("Automatically check for updates"));
 			m_auto_update->SetToolTip(_("Automatically checks for new cemu versions on startup"));
 			third_row->Add(m_auto_update, 0, botflag, 5);
@@ -1138,6 +1150,8 @@ void GeneralSettings2::StoreConfig()
 	wxGuiConfig.msw_theme = m_msw_theme->GetSelection();
 #endif
 	config.play_boot_sound = m_play_boot_sound->IsChecked();
+	config.bottom_screen_enabled = m_bottom_screen_enabled->IsChecked();
+	config.bottom_screen_port = (uint16)m_bottom_screen_port->GetValue();
 	config.disable_screensaver = m_disable_screensaver->IsChecked();
 	// toggle while a game is running
 	if (CafeSystem::IsTitleRunning())
@@ -1870,6 +1884,8 @@ void GeneralSettings2::ApplyConfig()
 
 	m_disable_screensaver->SetValue(config.disable_screensaver);
 	m_play_boot_sound->SetValue(config.play_boot_sound);
+	m_bottom_screen_enabled->SetValue(config.bottom_screen_enabled);
+	m_bottom_screen_port->SetValue(config.bottom_screen_port.GetValue());
 #if BOOST_OS_WINDOWS
 	m_msw_theme->SetSelection(wxGUIconfig.msw_theme);
 #endif
