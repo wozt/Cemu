@@ -11,6 +11,7 @@
 
 extern "C" {
 #include "bs_mailbox.h"
+#include "bs_net.h"
 #include "bs_protocol.h"
 #include "bs_server.h"
 #include "bs_source.h"
@@ -32,6 +33,20 @@ namespace
     /* Buttons held by clients, indexed by VPADController::ButtonId.
      * Written once per frame by ApplyInput, read by VPADController. */
     uint64    g_held = 0;
+
+    /*
+     * The announced frame rate is measured, not assumed.
+     *
+     * The GamePad is nominally 60 Hz, but a game that runs at 30 in
+     * emulation submits at 30, and announcing 60 would have every client
+     * pacing itself against a rate that never arrives. A short count
+     * before the server opens costs half a second and tells the truth.
+     */
+    uint32    g_rate_first_us = 0;
+    int       g_rate_frames = 0;
+    int       g_fps = 0;
+    constexpr int kWarmupFrames  = 90;   // discarded: the game is still starting
+    constexpr int kMeasureFrames = 90;   // counted: long enough to absorb a stutter
     std::vector<uint8> g_pixels;
 
     /*
@@ -71,16 +86,15 @@ void Start()
 
     if (!GetConfig().bottom_screen_enabled)
         return;
-    if (g_width <= 0 || g_height <= 0)
+    if (g_width <= 0 || g_height <= 0 || g_fps <= 0)
     {
-        // No frame has arrived yet, so we do not know what size to
-        // announce. Wait for one rather than guessing at 854x480, which
-        // is the GamePad's own resolution and not what Cemu renders at.
+        // Nothing has been measured yet, so there is nothing honest to
+        // announce. Wait rather than guess.
         g_tried = false;
         return;
     }
 
-    g_source = bs_mailbox_create(BS_CONSOLE_WIIU, g_width, g_height, 60, BS_PIXFMT_RGBA);
+    g_source = bs_mailbox_create(BS_CONSOLE_WIIU, g_width, g_height, g_fps, BS_PIXFMT_RGBA);
     if (!g_source)
     {
         fprintf(stderr, "bottom_screen: cannot create the frame mailbox\n");
@@ -117,6 +131,8 @@ void Stop()
     }
     g_tried = false;
     g_width = g_height = 0;
+    g_fps = 0;
+    g_rate_frames = 0;
 }
 
 bool IsRunning()
@@ -137,8 +153,10 @@ void SubmitPadView(LatteTextureView* texView)
         {
             warned = true;
             fprintf(stderr,
-                "bottom_screen: this render backend cannot read the pad view back\n"
-                "               yet. Switch to OpenGL, or wait for the Vulkan path.\n");
+                "bottom_screen: the pad view cannot be read back on this render\n"
+                "               backend yet, so nothing will be streamed.\n"
+                "               Set Options > General settings > Graphics > API\n"
+                "               to OpenGL. Vulkan and Metal are not supported yet.\n");
         }
         return;
     }
@@ -155,6 +173,41 @@ void SubmitPadView(LatteTextureView* texView)
     {
         g_width = w;
         g_height = h;
+
+        /*
+         * Measure the real rate, but not during the opening seconds.
+         *
+         * A game's first frames are its slowest -- shaders compiling,
+         * assets loading, caches cold -- and a sample taken there
+         * reports a third of the true rate. That is worse than assuming
+         * 60: the encoder's rate control and keyframe interval are both
+         * derived from this number, so a low reading spends the whole
+         * bitrate budget and emits keyframes three times too often.
+         *
+         * So: discard the warm-up, then count over a window long enough
+         * to average out a stutter. The server opens two or three
+         * seconds into the game instead of half a second, which nobody
+         * notices -- a phone is not connected before the game is even on
+         * screen.
+         */
+        g_rate_frames++;
+        if (g_rate_frames <= kWarmupFrames)
+            return;
+        if (g_rate_frames == kWarmupFrames + 1)
+        {
+            g_rate_first_us = bs_now_us();
+            return;
+        }
+
+        const uint32 elapsed = bs_now_us() - g_rate_first_us;
+        if (g_rate_frames < kWarmupFrames + kMeasureFrames || elapsed == 0)
+            return;
+
+        double fps = (double)(g_rate_frames - kWarmupFrames - 1) * 1000000.0 / (double)elapsed;
+        if (fps < 5.0)   fps = 5.0;
+        if (fps > 120.0) fps = 120.0;
+        g_fps = (int)(fps + 0.5);
+
         Start();
         if (!g_server)
             return;
