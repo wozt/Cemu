@@ -244,6 +244,17 @@ void ApplyInput()
             std::scoped_lock lock(instance.m_pad_touch.m_mutex);
             instance.m_pad_touch.position = { ix + (int)(fx * iw), iy + (int)(fy * ih) };
             instance.m_pad_touch.left_down = true;
+
+            // Said once. "My touch does nothing" is the hardest kind of
+            // report to act on, and this separates a client that never
+            // sent anything from a game that ignored what arrived.
+            static bool announced = false;
+            if (!announced)
+            {
+                announced = true;
+                fprintf(stderr, "bottom_screen: first touch from a client at %d,%d\n",
+                        in.touch_x, in.touch_y);
+            }
         }
     }
     else
