@@ -165,12 +165,18 @@ void SubmitPadView(LatteTextureView* texView)
     }
 
     /*
-     * The stream's size is fixed at the handshake, so a change of
-     * internal resolution mid-game means a new server rather than a
-     * silently mismatched picture. Rare, and cheap when it happens.
+     * A graphic pack or a resolution setting can change the pad view's
+     * size mid-game. The connection survives it: the server renegotiates
+     * with whoever is watching rather than dropping them over a setting.
      */
     if (g_server && (w != g_width || h != g_height))
-        Stop();
+    {
+        if (bs_mailbox_resize(g_source, w, h))
+        {
+            g_width = w;
+            g_height = h;
+        }
+    }
 
     if (!g_server)
     {
