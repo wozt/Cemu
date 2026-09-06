@@ -203,6 +203,8 @@ public:
 	void StopUsingPadAndWait();
 	bool IsPadWindowActive() override;
 
+	bool ReadbackViewRGBA(LatteTextureView* texView, std::vector<uint8>& out,
+	                      sint32& width, sint32& height) override;
 	void HandleScreenshotRequest(LatteTextureView* texView, bool padView) override;
 
 	void QueryMemoryInfo();

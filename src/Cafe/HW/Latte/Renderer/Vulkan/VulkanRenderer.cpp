@@ -1000,6 +1000,223 @@ bool VulkanRenderer::IsPadWindowActive()
 	return IsSwapchainInfoValid(false);
 }
 
+/*
+ * Reads the GamePad view back into RGBA for bottom_screen_server.
+ *
+ * The same shape as HandleScreenshotRequest below, which is where its
+ * Vulkan is borrowed from -- that path is proven in this codebase, and
+ * inventing a second way to move an image off the GPU would only be a
+ * worse one. The differences are that this keeps the alpha channel,
+ * leaves the bytes in whatever colour space the buffer uses rather than
+ * converting, and runs every frame instead of once.
+ *
+ * Leaving sRGB alone is deliberate: the OpenGL path hands back the
+ * stored bytes untouched, and a picture that changed colour when
+ * somebody switched their graphics API would be a strange thing to
+ * explain.
+ */
+bool VulkanRenderer::ReadbackViewRGBA(LatteTextureView* texView, std::vector<uint8>& out,
+                                      sint32& width, sint32& height)
+{
+	if (!texView)
+		return false;
+
+	auto texViewVk = (LatteTextureViewVk*)texView;
+	if (texViewVk->firstMip != 0)
+		return false;
+
+	auto baseImageTex = texViewVk->GetBaseImage();
+	auto textureVk = baseImageTex->GetImageObj();
+	textureVk->flagForCurrentCommandBuffer();
+
+	VkImage dumpImage = textureVk->m_image;
+	const VkImage baseImage = dumpImage;
+
+	baseImageTex->GetEffectiveSize(width, height, 0);
+	if (width <= 0 || height <= 0)
+		return false;
+
+	VkImage image = nullptr;
+	VkDeviceMemory imageMemory = nullptr;
+	auto format = baseImageTex->GetFormat();
+
+	if (format != VK_FORMAT_R8G8B8A8_UNORM && format != VK_FORMAT_R8G8B8A8_SRGB &&
+	    format != VK_FORMAT_R8G8B8_UNORM  && format != VK_FORMAT_R8G8B8_SRGB)
+	{
+		VkFormatProperties formatProps;
+		vkGetPhysicalDeviceFormatProperties(m_physicalDevice, format, &formatProps);
+		bool supportsBlit = (formatProps.optimalTilingFeatures & VK_FORMAT_FEATURE_BLIT_SRC_BIT) != 0;
+
+		// Match the destination's colour space to the source's, so the
+		// blit copies the encoded values rather than converting them.
+		const auto blitFormat = LatteGPUState.drcBufferUsesSRGB
+		                      ? VK_FORMAT_R8G8B8A8_SRGB : VK_FORMAT_R8G8B8A8_UNORM;
+
+		vkGetPhysicalDeviceFormatProperties(m_physicalDevice, blitFormat, &formatProps);
+		supportsBlit &= (formatProps.optimalTilingFeatures & VK_FORMAT_FEATURE_BLIT_DST_BIT) != 0;
+		if (!supportsBlit)
+			return false;
+
+		VkImageCreateInfo imageInfo{};
+		imageInfo.sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO;
+		imageInfo.format = blitFormat;
+		imageInfo.extent = {(uint32)width, (uint32)height, 1};
+		imageInfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
+		imageInfo.samples = VK_SAMPLE_COUNT_1_BIT;
+		imageInfo.arrayLayers = 1;
+		imageInfo.mipLevels = 1;
+		imageInfo.usage = VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_TRANSFER_SRC_BIT;
+		imageInfo.imageType = VK_IMAGE_TYPE_2D;
+		imageInfo.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+		imageInfo.tiling = VK_IMAGE_TILING_OPTIMAL;
+
+		if (vkCreateImage(m_logicalDevice, &imageInfo, nullptr, &image) != VK_SUCCESS)
+			return false;
+
+		VkMemoryRequirements memRequirements;
+		vkGetImageMemoryRequirements(m_logicalDevice, image, &memRequirements);
+
+		VkMemoryAllocateInfo allocInfo{};
+		allocInfo.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
+		allocInfo.allocationSize = memRequirements.size;
+		uint32 memIndex;
+		if (!memoryManager->FindMemoryType(memRequirements.memoryTypeBits,
+		                                   VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, memIndex))
+		{
+			vkDestroyImage(m_logicalDevice, image, nullptr);
+			return false;
+		}
+		allocInfo.memoryTypeIndex = memIndex;
+
+		if (vkAllocateMemory(m_logicalDevice, &allocInfo, nullptr, &imageMemory) != VK_SUCCESS)
+		{
+			vkDestroyImage(m_logicalDevice, image, nullptr);
+			return false;
+		}
+		vkBindImageMemory(m_logicalDevice, image, imageMemory, 0);
+
+		{
+			VkImageSubresourceRange range;
+			range.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+			range.baseMipLevel = 0;
+			range.levelCount = 1;
+			range.baseArrayLayer = 0;
+			range.layerCount = 1;
+			barrier_image<TRANSFER_READ, TRANSFER_WRITE>(image, range, VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL);
+		}
+		{
+			VkImageSubresourceLayers range;
+			range.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+			range.mipLevel = 0;
+			range.baseArrayLayer = texViewVk->firstSlice;
+			range.layerCount = 1;
+			barrier_image<IMAGE_WRITE | TRANSFER_WRITE, SYNC_OP::TRANSFER_READ>(baseImageTex, range, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL);
+		}
+
+		VkOffset3D blitSize{width, height, 1};
+		VkImageBlit imageBlitRegion{};
+		imageBlitRegion.srcSubresource.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+		imageBlitRegion.srcSubresource.mipLevel = 0;
+		imageBlitRegion.srcSubresource.baseArrayLayer = texViewVk->firstSlice;
+		imageBlitRegion.srcSubresource.layerCount = 1;
+		imageBlitRegion.srcOffsets[1] = blitSize;
+		imageBlitRegion.dstSubresource.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+		imageBlitRegion.dstSubresource.mipLevel = 0;
+		imageBlitRegion.dstSubresource.baseArrayLayer = 0;
+		imageBlitRegion.dstSubresource.layerCount = 1;
+		imageBlitRegion.dstOffsets[1] = blitSize;
+
+		vkCmdBlitImage(m_state.currentCommandBuffer, dumpImage, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
+		               image, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &imageBlitRegion, VK_FILTER_NEAREST);
+
+		{
+			VkImageSubresourceRange range;
+			range.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+			range.baseMipLevel = 0;
+			range.levelCount = 1;
+			range.baseArrayLayer = 0;
+			range.layerCount = 1;
+			barrier_image<TRANSFER_WRITE, TRANSFER_READ>(image, range, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_IMAGE_LAYOUT_GENERAL);
+		}
+		{
+			VkImageSubresourceLayers range;
+			range.aspectMask = baseImageTex->GetImageAspect();
+			range.mipLevel = 0;
+			range.baseArrayLayer = texViewVk->firstSlice;
+			range.layerCount = 1;
+			barrier_image<TRANSFER_READ, TRANSFER_WRITE | IMAGE_WRITE>(baseImageTex, range, baseImageTex->GetDefaultLayout());
+		}
+
+		format = blitFormat;
+		dumpImage = image;
+	}
+
+	const bool threeByte = (format == VK_FORMAT_R8G8B8_UNORM || format == VK_FORMAT_R8G8B8_SRGB);
+	const uint32 pixelBytes = threeByte ? 3 : 4;
+	const uint32 size = pixelBytes * width * height;
+
+	VkBufferImageCopy region{};
+	region.bufferOffset = 0;
+	region.bufferRowLength = width;
+	region.bufferImageHeight = height;
+	region.imageSubresource.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+	region.imageSubresource.baseArrayLayer = 0;
+	region.imageSubresource.layerCount = 1;
+	region.imageSubresource.mipLevel = 0;
+	region.imageOffset = {0, 0, 0};
+	region.imageExtent = {(uint32)width, (uint32)height, 1};
+
+	void* bufferPtr = nullptr;
+	VkBuffer buffer = nullptr;
+	VkDeviceMemory bufferMemory = nullptr;
+	memoryManager->CreateBuffer(size, VK_BUFFER_USAGE_TRANSFER_DST_BIT,
+	                            VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT | VK_MEMORY_PROPERTY_HOST_CACHED_BIT,
+	                            buffer, bufferMemory);
+	vkMapMemory(m_logicalDevice, bufferMemory, 0, VK_WHOLE_SIZE, 0, &bufferPtr);
+
+	// No blit happened, so the source is the emulator's own image: it
+	// needs the barrier, and its slice may not be zero.
+	if (dumpImage == baseImage)
+	{
+		region.imageSubresource.baseArrayLayer = texViewVk->firstSlice;
+		barrier_image<IMAGE_WRITE | TRANSFER_WRITE, TRANSFER_READ>(baseImageTex, region.imageSubresource, VK_IMAGE_LAYOUT_GENERAL);
+	}
+
+	vkCmdCopyImageToBuffer(m_state.currentCommandBuffer, dumpImage, VK_IMAGE_LAYOUT_GENERAL, buffer, 1, &region);
+
+	if (dumpImage == baseImage)
+		barrier_image<TRANSFER_READ, TRANSFER_WRITE | IMAGE_WRITE>(baseImageTex, region.imageSubresource, baseImageTex->GetDefaultLayout());
+
+	SubmitCommandBuffer();
+	WaitCommandBufferFinished(GetCurrentCommandBufferId());
+
+	out.resize((size_t)width * height * 4);
+	if (threeByte)
+	{
+		const uint8* src = (const uint8*)bufferPtr;
+		uint8* dst = out.data();
+		for (sint32 i = 0; i < width * height; i++)
+		{
+			dst[0] = src[0]; dst[1] = src[1]; dst[2] = src[2]; dst[3] = 0xFF;
+			src += 3; dst += 4;
+		}
+	}
+	else
+	{
+		memcpy(out.data(), bufferPtr, size);
+	}
+
+	vkUnmapMemory(m_logicalDevice, bufferMemory);
+	vkFreeMemory(m_logicalDevice, bufferMemory, nullptr);
+	vkDestroyBuffer(m_logicalDevice, buffer, nullptr);
+	if (image)
+		vkDestroyImage(m_logicalDevice, image, nullptr);
+	if (imageMemory)
+		vkFreeMemory(m_logicalDevice, imageMemory, nullptr);
+
+	return true;
+}
+
 void VulkanRenderer::HandleScreenshotRequest(LatteTextureView* texView, bool padView)
 {
 	if (!m_screenshot_requested && m_screenshot_state == ScreenshotState::None)

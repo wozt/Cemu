@@ -173,9 +173,8 @@ void SubmitPadView(LatteTextureView* texView)
             warned = true;
             fprintf(stderr,
                 "bottom_screen: the pad view cannot be read back on this render\n"
-                "               backend yet, so nothing will be streamed.\n"
-                "               Set Options > General settings > Graphics > API\n"
-                "               to OpenGL. Vulkan and Metal are not supported yet.\n");
+                "               backend, so nothing will be streamed. OpenGL and\n"
+                "               Vulkan both work; Metal does not yet.\n");
         }
         return;
     }
