@@ -60,4 +60,13 @@ void ApplyInput();
  */
 bool IsButtonHeld(int vpadButtonId);
 
+/*
+ * A stick a client is deflecting: 0 for the left, 1 for the right.
+ *
+ * Returns false when the client is leaving it centred, so the local
+ * mapping keeps the stick and a pad on the host still works. Values are
+ * -1..1, y positive upwards, which is what VPADController expects.
+ */
+bool GetStick(int index, float& x, float& y);
+
 }

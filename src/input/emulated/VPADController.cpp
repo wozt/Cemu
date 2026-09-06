@@ -87,7 +87,13 @@ void VPADController::VPADRead(VPADStatus_t& status, const BtnRepeat& repeat)
 
 	m_homebutton_down |= is_home_down();
 
-	const auto axis = get_axis();
+	auto axis = get_axis();
+#ifdef BOTTOM_SCREEN_ENABLED
+	{
+		float nx, ny;
+		if (BottomScreen::GetStick(0, nx, ny)) { axis.x = nx; axis.y = ny; }
+	}
+#endif
 	status.leftStick.x = axis.x;
 	status.leftStick.y = axis.y;
 
@@ -105,7 +111,13 @@ void VPADController::VPADRead(VPADStatus_t& status, const BtnRepeat& repeat)
 	else if (axis.y >= kAxisThreshold || (HAS_FLAG(last_hold, VPAD_STICK_L_UP) && axis.y >= kHoldAxisThreshold))
 		status.hold |= VPAD_STICK_L_UP;
 
-	const auto rotation = get_rotation();
+	auto rotation = get_rotation();
+#ifdef BOTTOM_SCREEN_ENABLED
+	{
+		float nx, ny;
+		if (BottomScreen::GetStick(1, nx, ny)) { rotation.x = nx; rotation.y = ny; }
+	}
+#endif
 	status.rightStick.x = rotation.x;
 	status.rightStick.y = rotation.y;
 

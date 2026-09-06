@@ -33,6 +33,8 @@ namespace
     /* Buttons held by clients, indexed by VPADController::ButtonId.
      * Written once per frame by ApplyInput, read by VPADController. */
     uint64    g_held = 0;
+    /* Axes as sent, indexed by BsAxis - 1. */
+    sint16    g_axis[4] = {0, 0, 0, 0};
 
     /*
      * The announced frame rate is measured, not assumed.
@@ -273,6 +275,38 @@ void ApplyInput()
             held |= (1ull << id);
     }
     g_held = held;
+    for (int i = 0; i < 4; i++)
+        g_axis[i] = in.axis[i];
+
+}
+
+bool GetStick(int index, float& x, float& y)
+{
+    if (!g_server || index < 0 || index > 1)
+        return false;
+
+    const int xi = (index == 0) ? BS_AXIS_LEFT_X - 1 : BS_AXIS_RIGHT_X - 1;
+    const int yi = (index == 0) ? BS_AXIS_LEFT_Y - 1 : BS_AXIS_RIGHT_Y - 1;
+
+    // Centred means "not in use": say so, and the host's own pad keeps
+    // the stick rather than being pinned to zero by an idle client.
+    if (g_axis[xi] == 0 && g_axis[yi] == 0)
+        return false;
+
+    x = (float)g_axis[xi] / 32767.0f;
+    y = (float)g_axis[yi] / 32767.0f;
+
+    // Said once per stick, for the same reason as the touch line: a
+    // stick that does nothing could be the client, the wire, or the
+    // game, and these are indistinguishable from outside.
+    static bool announced[2] = {false, false};
+    if (!announced[index])
+    {
+        announced[index] = true;
+        fprintf(stderr, "bottom_screen: first %s stick from a client at %.2f,%.2f\n",
+                index == 0 ? "left" : "right", x, y);
+    }
+    return true;
 }
 
 bool IsButtonHeld(int vpadButtonId)
