@@ -1,5 +1,6 @@
 #include "Cafe/HW/Latte/Core/BottomScreenBridge.h"
 
+#include <cstdlib>
 #include <cstdio>
 #include <cstring>
 #include <vector>
@@ -86,6 +87,13 @@ void Start()
         return;
     g_tried = true;
 
+    // The variable wins over the setting: a scripted launch should be
+    // able to turn this off without editing a config file somebody else
+    // owns -- and Cemu rewrites its settings.xml on exit, so an edit
+    // made while it is running would be lost anyway. Without one, the
+    // setting decides. melonDS and Azahar read the same two names.
+    if (const char* off = getenv("BOTTOM_SCREEN"); off && !strcmp(off, "0"))
+        return;
     if (!GetConfig().bottom_screen_enabled)
         return;
     if (g_width <= 0 || g_height <= 0 || g_fps <= 0)
@@ -104,9 +112,17 @@ void Start()
         return;
     }
 
+    int port = GetConfig().bottom_screen_port.GetValue();
+    if (const char* p = getenv("BOTTOM_SCREEN_PORT"))
+    {
+        const int v = atoi(p);
+        if (v > 0 && v < 65536)
+            port = v;
+    }
+
     BsServerConfig cfg;
     memset(&cfg, 0, sizeof(cfg));
-    cfg.port = GetConfig().bottom_screen_port.GetValue();
+    cfg.port = (uint16_t)port;
 
     char err[256] = "";
     g_server = bs_server_create(g_source, &cfg, err, sizeof(err));
