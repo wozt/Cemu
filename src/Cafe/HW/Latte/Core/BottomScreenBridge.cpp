@@ -313,7 +313,20 @@ bool IsButtonHeld(int vpadButtonId)
 {
     if (!g_server || vpadButtonId <= 0 || vpadButtonId >= 64)
         return false;
-    return (g_held & (1ull << vpadButtonId)) != 0;
+    const bool held = (g_held & (1ull << vpadButtonId)) != 0;
+
+    // Said once, like the touch and stick lines. This one also proves
+    // the emulated controller exists at all: without one Cemu never
+    // calls this, and a client's buttons vanish with nothing to show
+    // for it.
+    static bool announced = false;
+    if (held && !announced)
+    {
+        announced = true;
+        fprintf(stderr, "bottom_screen: first button from a client (id %d)\n",
+                vpadButtonId);
+    }
+    return held;
 }
 
 }
