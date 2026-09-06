@@ -707,6 +707,7 @@ if (EXISTS "${BOTTOM_SCREEN_DIR}/bs_server.c")
     target_sources(CemuCafe PRIVATE
         "${BOTTOM_SCREEN_DIR}/bs_server.c"
         "${BOTTOM_SCREEN_DIR}/bs_encoder.c"
+        "${BOTTOM_SCREEN_DIR}/bs_audio.c"
         "${BOTTOM_SCREEN_DIR}/bs_net.c"
         "${BOTTOM_SCREEN_DIR}/bs_mailbox.c"
     )
@@ -716,6 +717,7 @@ if (EXISTS "${BOTTOM_SCREEN_DIR}/bs_server.c")
     set_source_files_properties(
         "${BOTTOM_SCREEN_DIR}/bs_server.c"
         "${BOTTOM_SCREEN_DIR}/bs_encoder.c"
+        "${BOTTOM_SCREEN_DIR}/bs_audio.c"
         "${BOTTOM_SCREEN_DIR}/bs_net.c"
         "${BOTTOM_SCREEN_DIR}/bs_mailbox.c"
         PROPERTIES SKIP_PRECOMPILE_HEADERS ON)

@@ -5,6 +5,10 @@
 //#include "ax.h"
 #include "config/CemuConfig.h"
 
+#ifdef BOTTOM_SCREEN_ENABLED
+#include "Cafe/HW/Latte/Core/BottomScreenBridge.h"
+#endif
+
 namespace snd_core
 {
 	uint32 numProcessedFrames = 0;
@@ -185,6 +189,15 @@ namespace snd_core
 		{
 			if(g_tvAudio)
 				g_tvAudio->FeedBlock(tempTVChannelData);
+
+#ifdef BOTTOM_SCREEN_ENABLED
+			// The same block, on its way to the stream. Taken here
+			// rather than inside an audio backend so it does not depend
+			// on which one is in use.
+			BottomScreen::SubmitAudio(tempTVChannelData,
+			                          AX_SAMPLES_PER_3MS_48KHZ * AX_FRAMES_PER_GROUP,
+			                          (int)channels);
+#endif
 
 			tempAudioBlockCounter = 0;
 		}

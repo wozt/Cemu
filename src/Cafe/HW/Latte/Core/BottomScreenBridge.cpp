@@ -96,7 +96,8 @@ void Start()
         return;
     }
 
-    g_source = bs_mailbox_create(BS_CONSOLE_WIIU, g_width, g_height, g_fps, BS_PIXFMT_RGBA);
+    g_source = bs_mailbox_create(BS_CONSOLE_WIIU, g_width, g_height, g_fps,
+                                 BS_PIXFMT_RGBA, 48000, 2);
     if (!g_source)
     {
         fprintf(stderr, "bottom_screen: cannot create the frame mailbox\n");
@@ -278,6 +279,32 @@ void ApplyInput()
     for (int i = 0; i < 4; i++)
         g_axis[i] = in.axis[i];
 
+}
+
+void SubmitAudio(const sint16* samples, int frames, int channels)
+{
+    if (!g_server || !samples || frames <= 0 || channels < 1)
+        return;
+
+    if (channels == 2)
+    {
+        bs_mailbox_submit_audio(g_source, (const int16_t*)samples, frames);
+        return;
+    }
+
+    // Fold to stereo. Mono is duplicated; more than two channels keep
+    // the front pair, which is where the game's own mix puts almost
+    // everything that matters on a handheld.
+    static std::vector<int16_t> stereo;
+    stereo.resize((size_t)frames * 2);
+    for (int i = 0; i < frames; i++)
+    {
+        const sint16 l = samples[(size_t)i * channels];
+        const sint16 r = channels > 1 ? samples[(size_t)i * channels + 1] : l;
+        stereo[(size_t)i * 2]     = l;
+        stereo[(size_t)i * 2 + 1] = r;
+    }
+    bs_mailbox_submit_audio(g_source, stereo.data(), frames);
 }
 
 bool GetStick(int index, float& x, float& y)

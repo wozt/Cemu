@@ -69,4 +69,19 @@ bool IsButtonHeld(int vpadButtonId);
  */
 bool GetStick(int index, float& x, float& y);
 
+/*
+ * Sound, as Cemu mixes it for the TV: 48 kHz, 16-bit interleaved,
+ * however many channels the output device has.
+ *
+ * The TV mix rather than the GamePad's own: the Wii U does have a
+ * separate DRC stream for the pad speaker, but Cemu leaves its volume at
+ * zero by default, so that path usually does not exist. This is the
+ * sound a player expects to hear, and it is always there.
+ *
+ * Anything above stereo is folded down to two channels, because Opus is
+ * configured for two and a surround mix on a phone is not worth the
+ * bitrate.
+ */
+void SubmitAudio(const sint16* samples, int frames, int channels);
+
 }
