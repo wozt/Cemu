@@ -701,32 +701,20 @@ set(BOTTOM_SCREEN_DIR "${CMAKE_SOURCE_DIR}/../.." CACHE PATH
     "Path to the bottom_screen_server sources")
 
 if (EXISTS "${BOTTOM_SCREEN_DIR}/bs_server.c")
-    find_package(PkgConfig REQUIRED)
-    pkg_check_modules(BOTTOMSCREEN_FFMPEG REQUIRED libavcodec libavutil libswscale libswresample)
+    # The file list lives beside the sources it names, so adding one is
+    # a single edit rather than three that can be forgotten separately.
+    include("${BOTTOM_SCREEN_DIR}/bottom_screen.cmake")
+    bottom_screen_sources(BOTTOM_SCREEN_C)
 
-    target_sources(CemuCafe PRIVATE
-        "${BOTTOM_SCREEN_DIR}/bs_server.c"
-        "${BOTTOM_SCREEN_DIR}/bs_encoder.c"
-        "${BOTTOM_SCREEN_DIR}/bs_audio.c"
-        "${BOTTOM_SCREEN_DIR}/bs_net.c"
-        "${BOTTOM_SCREEN_DIR}/bs_mailbox.c"
-    )
+    target_sources(CemuCafe PRIVATE ${BOTTOM_SCREEN_C})
+
     # The target uses a C++ precompiled header, and CMake applies it to
     # every source in the target. Handing a C++ PCH to the C compiler
     # fails on the first C++ include it meets, so the C sources opt out.
-    set_source_files_properties(
-        "${BOTTOM_SCREEN_DIR}/bs_server.c"
-        "${BOTTOM_SCREEN_DIR}/bs_encoder.c"
-        "${BOTTOM_SCREEN_DIR}/bs_audio.c"
-        "${BOTTOM_SCREEN_DIR}/bs_net.c"
-        "${BOTTOM_SCREEN_DIR}/bs_mailbox.c"
+    set_source_files_properties(${BOTTOM_SCREEN_C}
         PROPERTIES SKIP_PRECOMPILE_HEADERS ON)
 
-    target_include_directories(CemuCafe PRIVATE
-        "${BOTTOM_SCREEN_DIR}" ${BOTTOMSCREEN_FFMPEG_INCLUDE_DIRS})
-    target_link_libraries(CemuCafe PRIVATE
-        ${BOTTOMSCREEN_FFMPEG_LIBRARIES} pthread)
-    target_compile_definitions(CemuCafe PRIVATE BOTTOM_SCREEN_ENABLED)
+    bottom_screen_attach(CemuCafe)
 
     message(STATUS "bottom_screen_server: enabled for Cemu (${BOTTOM_SCREEN_DIR})")
 else()
