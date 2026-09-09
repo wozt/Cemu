@@ -978,6 +978,15 @@ void LatteRenderTarget_copyToBackbuffer(LatteTextureView* textureView, bool isPa
 		BottomScreen::SubmitPadView(textureView);
 		BottomScreen::ApplyInput();
 	}
+	else
+	{
+		// And the television picture, for a client that asked for that
+		// one instead. Same moment in the same function, for the same
+		// reason: it has just been drawn and the texture is still bound.
+		// This returns before touching the renderer unless somebody is
+		// watching, so it costs nothing when nobody is.
+		BottomScreen::SubmitTvView(textureView);
+	}
 #endif
 	if (!g_renderer->ImguiBegin(!isPadView))
 		return;

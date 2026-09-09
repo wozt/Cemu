@@ -44,6 +44,15 @@ bool IsRunning();
 void SubmitPadView(LatteTextureView* texView);
 
 /*
+ * The television picture, offered to any client that asks for it.
+ *
+ * Returns immediately -- before reading anything back from the GPU --
+ * unless somebody is actually watching it, so a second screen nobody
+ * has switched on costs the game nothing.
+ */
+void SubmitTvView(LatteTextureView* texView);
+
+/*
  * Pushes what the clients are holding into Cemu's input state. Called
  * once per frame from the same place the video is submitted, so the two
  * stay on the same clock.
@@ -82,6 +91,9 @@ bool GetStick(int index, float& x, float& y);
  * configured for two and a surround mix on a phone is not worth the
  * bitrate.
  */
-void SubmitAudio(const sint16* samples, int frames, int channels);
+/* padOutput picks which of the Wii U's two outputs this block came
+ * from; the two are summed before being sent. */
+void SubmitAudio(const sint16* samples, int frames, int channels,
+                 bool padOutput);
 
 }
