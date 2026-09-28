@@ -166,6 +166,8 @@ private:
 	void OnRequestGameExit(wxCommandEvent& event);
 	void OnRequestHomeMenu(wxCommandEvent& event);
 	void OnHomeMenuProcessEnded(wxProcessEvent& event);
+	void ConfigureSystemOverlayWindow();
+	bool LaunchWiiUMenu();
 
 	wxRect GetDesktopRect();
 

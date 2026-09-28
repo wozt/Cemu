@@ -481,6 +481,21 @@ void sysappExport__SYSSwitchToOverlayFromHBM(PPCInterpreter_t* hCPU)
 	osLib_returnFromFunction(hCPU, 0);
 }
 
+void sysappExport__SYSLaunchMenuFromHBM(PPCInterpreter_t* hCPU)
+{
+	if (LaunchSettings::IsSystemOverlayChild())
+	{
+		std::thread shutdown_thread([]() {
+			CafeSystem::ShutdownTitle();
+			CafeSystem::NotifyPPCProcessExit(LaunchSettings::SYSTEM_OVERLAY_EXIT_LAUNCH_WII_U_MENU);
+		});
+		shutdown_thread.detach();
+		coreinit::OSSuspendThread(coreinit::OSGetCurrentThread());
+		return;
+	}
+	osLib_returnFromFunction(hCPU, 0);
+}
+
 void sysappExport__SYSGetEShopArgs(PPCInterpreter_t* hCPU)
 {
 	ppcDefineParamStructPtr(args, eshopArguments_t, 0);
@@ -751,6 +766,9 @@ namespace sysapp
 			cafeExportRegisterFunc(_SYSGetLauncherArgs, "sysapp", "_SYSGetLauncherArgs", LogType::Placeholder);
 			cafeExportRegisterFunc(_SYSGetHBMArgs, "sysapp", "_SYSGetHBMArgs", LogType::Placeholder);
 			osLib_addFunction("sysapp", "_SYSSwitchToOverlayFromHBM", sysappExport__SYSSwitchToOverlayFromHBM);
+			osLib_addFunction("sysapp", "_SYSLaunchMenuFromHBM", sysappExport__SYSLaunchMenuFromHBM);
+			osLib_addFunction("sysapp", "_SYSLaunchMenuWithCheckingAccountFromHBM", sysappExport__SYSLaunchMenuFromHBM);
+			osLib_addFunction("sysapp", "_SYSLaunchMenuWithPackFromHBM", sysappExport__SYSLaunchMenuFromHBM);
 			cafeExportRegisterFunc(_SYSGetAccountArgs, "sysapp", "_SYSGetAccountArgs", LogType::Placeholder);
 
 			sysapp::load();
