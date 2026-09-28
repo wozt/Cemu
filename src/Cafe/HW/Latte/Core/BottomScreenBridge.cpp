@@ -31,6 +31,8 @@ namespace
 {
     BsSource* g_source = nullptr;
     BsServer* g_server = nullptr;
+    std::recursive_mutex g_state_mutex;
+    bool      g_suspended = false;
     bool      g_tried  = false;
     int       g_width  = 0;
     int       g_height = 0;
@@ -107,6 +109,9 @@ namespace
 
 void Start()
 {
+	std::lock_guard<std::recursive_mutex> state_lock(g_state_mutex);
+	if (g_suspended)
+		return;
     if (g_tried)
         return;
     g_tried = true;
@@ -166,6 +171,7 @@ void Start()
 
 void Stop()
 {
+	std::lock_guard<std::recursive_mutex> state_lock(g_state_mutex);
     if (g_server)
     {
         bs_server_destroy(g_server);
@@ -193,7 +199,18 @@ void Stop()
 
 bool IsRunning()
 {
+	std::lock_guard<std::recursive_mutex> state_lock(g_state_mutex);
     return g_server != nullptr;
+}
+
+void SetSuspended(bool suspended)
+{
+	std::lock_guard<std::recursive_mutex> state_lock(g_state_mutex);
+	if (g_suspended == suspended)
+		return;
+	g_suspended = suspended;
+	if (suspended)
+		Stop();
 }
 
 /*
@@ -238,6 +255,9 @@ static bool MeasureRateAndStart(bool fromPad)
 
 void SubmitPadView(LatteTextureView* texView)
 {
+	std::lock_guard<std::recursive_mutex> state_lock(g_state_mutex);
+	if (g_suspended)
+		return;
     if (!GetConfig().bottom_screen_enabled || !texView)
         return;
 
@@ -314,6 +334,9 @@ void SubmitPadView(LatteTextureView* texView)
  */
 void SubmitTvView(LatteTextureView* texView)
 {
+	std::lock_guard<std::recursive_mutex> state_lock(g_state_mutex);
+	if (g_suspended)
+		return;
     if (!GetConfig().bottom_screen_enabled || !texView)
         return;
 
@@ -443,6 +466,9 @@ void PollKeyboard()
 
 void ApplyInput()
 {
+	std::lock_guard<std::recursive_mutex> state_lock(g_state_mutex);
+	if (g_suspended)
+		return;
     if (!g_server)
         return;
 
@@ -584,6 +610,9 @@ namespace
 
 void SubmitAudio(const sint16* samples, int frames, int channels, bool padOutput)
 {
+	std::lock_guard<std::recursive_mutex> state_lock(g_state_mutex);
+	if (g_suspended)
+		return;
     if (!g_server || !samples || frames <= 0 || channels < 1)
         return;
 
@@ -604,6 +633,9 @@ void SubmitAudio(const sint16* samples, int frames, int channels, bool padOutput
 
 bool GetStick(int index, float& x, float& y)
 {
+	std::lock_guard<std::recursive_mutex> state_lock(g_state_mutex);
+	if (g_suspended)
+		return false;
     if (!g_server || index < 0 || index > 1)
         return false;
 
@@ -633,6 +665,9 @@ bool GetStick(int index, float& x, float& y)
 
 bool IsButtonHeld(int vpadButtonId)
 {
+	std::lock_guard<std::recursive_mutex> state_lock(g_state_mutex);
+	if (g_suspended)
+		return false;
     if (!g_server || vpadButtonId <= 0 || vpadButtonId >= 64)
         return false;
     const bool held = (g_held & (1ull << vpadButtonId)) != 0;

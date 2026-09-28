@@ -3,6 +3,7 @@
 #include <wx/wx.h>
 #include <wx/dataview.h>
 #include <wx/infobar.h>
+#include <wx/process.h>
 
 #include "wxgui/PadViewFrame.h"
 #include "wxgui/MemorySearcherTool.h"
@@ -133,6 +134,7 @@ public:
 	void OnGesturePan(wxPanGestureEvent& event);
 
 	void OnGameLoaded();
+	void RequestHomeMenu();
 
 	void AsyncSetTitle(std::string_view windowTitle);
 
@@ -162,6 +164,8 @@ private:
 
 	void OnRequestRecreateCanvas(wxCommandEvent& event);
 	void OnRequestGameExit(wxCommandEvent& event);
+	void OnRequestHomeMenu(wxCommandEvent& event);
+	void OnHomeMenuProcessEnded(wxProcessEvent& event);
 
 	wxRect GetDesktopRect();
 
@@ -179,6 +183,9 @@ private:
 
 	bool m_menu_visible = false;
 	bool m_game_launched = false;
+	wxProcess* m_home_menu_process = nullptr;
+	long m_home_menu_pid = 0;
+	bool m_home_menu_pad_was_shown = false;
 
 	#ifdef ENABLE_DISCORD_RPC
 	std::unique_ptr<DiscordPresence> m_discord;

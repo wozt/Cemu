@@ -32,6 +32,7 @@ namespace BottomScreen
 void Start();
 void Stop();
 bool IsRunning();
+void SetSuspended(bool suspended);
 
 /*
  * Reads the pad view back off the GPU and hands it to the server.

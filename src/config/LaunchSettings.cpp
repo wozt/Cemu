@@ -84,6 +84,8 @@ std::optional<int> LaunchSettings::HandleCommandline(const std::vector<std::wstr
 	hidden.add_options()
 		("nsight", po::value<bool>()->implicit_value(true), "NSight debugging options")
 		("legacy", po::value<bool>()->implicit_value(true), "Intel legacy graphic mode")
+		("system-overlay-child", po::value<bool>()->implicit_value(true), "Run a Wii U system overlay for another Cemu instance")
+		("system-overlay-caller-title-id", po::value<std::string>(), "Title ID of the application below a system overlay")
 		("ppcrec-lower-addr", po::value<std::string>(), "For debugging: Lower address allowed for PPC recompilation")
 		("ppcrec-upper-addr", po::value<std::string>(), "For debugging: Upper address allowed for PPC recompilation");
 
@@ -196,6 +198,22 @@ std::optional<int> LaunchSettings::HandleCommandline(const std::vector<std::wstr
 
 		if (vm.count("open-debugger"))
 			s_open_debugger = vm["open-debugger"].as<bool>();
+
+		if (vm.count("system-overlay-child"))
+			s_system_overlay_child = vm["system-overlay-child"].as<bool>();
+		if (vm.count("system-overlay-caller-title-id"))
+		{
+			const auto title_id = vm["system-overlay-caller-title-id"].as<std::string>();
+			try
+			{
+				s_system_overlay_caller_title_id = std::stoull(title_id, nullptr, 16);
+			}
+			catch (const std::exception&)
+			{
+				std::cerr << "Expected system overlay caller title ID as an unsigned 64-bit hexadecimal string\n";
+				return 1;
+			}
+		}
 
 		if (vm.count("forward-console-logging"))
 		{

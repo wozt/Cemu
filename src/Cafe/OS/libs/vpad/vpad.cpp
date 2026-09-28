@@ -5,6 +5,8 @@
 #include "Cafe/OS/libs/coreinit/coreinit_Time.h"
 #include "config/ActiveSettings.h"
 #include "Cafe/OS/libs/coreinit/coreinit_Alarm.h"
+#include "Cafe/OS/libs/coreinit/coreinit_Misc.h"
+#include "config/LaunchSettings.h"
 #include "input/InputManager.h"
 #include "WindowSystem.h"
 
@@ -286,6 +288,15 @@ namespace vpad
 				}
 			}
 			controller->VPADRead(*status, vpad::g_vpad.controller_data[channel].btn_repeat);
+			// Many retail titles (including the Home Button Menu itself) poll
+			// VPAD directly instead of installing a sampling callback. Detect
+			// HOME on that path as well.
+			if (controller->was_home_button_down() &&
+				(LaunchSettings::IsSystemOverlayChild() ||
+				 coreinit::OSIsHomeButtonMenuEnabled()))
+			{
+				WindowSystem::RequestHomeMenu();
+			}
 			if (error)
 				*error = VPAD_READ_ERR_NONE;
 			return 1;
@@ -1128,6 +1139,11 @@ namespace vpad
 {
 	void TickFunction(PPCInterpreter_t* hCPU)
 	{
+		// A foreground-acquire request can arrive while ProcUI is already
+		// blocked on the system queue. Pump it from this periodic PPC alarm
+		// so the queued message wakes the background receiver.
+		coreinit::UpdateSystemMessageQueue();
+
 		// check if homebutton is pressed
 		// check connection to drc
 		const auto& instance = InputManager::instance();
@@ -1138,6 +1154,12 @@ namespace vpad
 			
 			if(const auto controller = instance.get_vpad_controller(i))
 			{
+				if (controller->was_home_button_down() &&
+					(LaunchSettings::IsSystemOverlayChild() ||
+					 coreinit::OSIsHomeButtonMenuEnabled()))
+				{
+					WindowSystem::RequestHomeMenu();
+				}
 				cemuLog_log(LogType::InputAPI, "Calling VPADSamplingCallback({})", i);
 				PPCCoreCallback(g_vpad.controller_data[i].sampling_callback, i);
 			}

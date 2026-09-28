@@ -10,8 +10,12 @@ namespace coreinit
 	uint32 OSRestartGame(uint32 argc, MEMPTR<char>* argv);
 
 	void OSReleaseForeground();
+	bool OSIsHomeButtonMenuEnabled();
 
+	void StartBackgroundTransition();
+	void StartForegroundTransition();
 	void StartBackgroundForegroundTransition();
+	void UpdateSystemMessageQueue();
 
 	struct OSDriverInterface
 	{

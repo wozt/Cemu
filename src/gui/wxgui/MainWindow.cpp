@@ -60,11 +60,18 @@
 //Cafe libs
 #include "Cafe/OS/libs/nfc/nfc.h"
 #include "Cafe/OS/libs/swkbd/swkbd.h"
+#include "Cafe/HW/Latte/Core/BottomScreenBridge.h"
 
 #include "Cafe/HW/Latte/Renderer/Renderer.h" // For renderer API checks
 
 extern WindowSystem::WindowInfo g_window_info;
 extern std::shared_mutex g_mutex;
+
+namespace coreinit
+{
+	void StartBackgroundTransition();
+	void StartForegroundTransition();
+}
 
 enum
 {
@@ -156,6 +163,7 @@ enum
 	MAINFRAME_MENU_ID_HELP_UPDATE,
 	// custom
 	MAINFRAME_ID_TIMER1 = 21800,
+	MAINFRAME_ID_HOME_MENU_PROCESS,
 };
 
 wxDEFINE_EVENT(wxEVT_SET_WINDOW_TITLE, wxCommandEvent);
@@ -163,6 +171,7 @@ wxDEFINE_EVENT(wxEVT_REQUEST_GAMELIST_REFRESH, wxCommandEvent);
 wxDEFINE_EVENT(wxEVT_LAUNCH_GAME, wxLaunchGameEvent);
 wxDEFINE_EVENT(wxEVT_REQUEST_RECREATE_CANVAS, wxCommandEvent);
 wxDEFINE_EVENT(wxEVT_REQUEST_GAME_EXIT, wxCommandEvent);
+wxDEFINE_EVENT(wxEVT_REQUEST_HOME_MENU, wxCommandEvent);
 
 wxBEGIN_EVENT_TABLE(MainWindow, wxFrame)
 EVT_TIMER(MAINFRAME_ID_TIMER1, MainWindow::OnTimer)
@@ -245,6 +254,8 @@ EVT_COMMAND(wxID_ANY, wxEVT_SET_WINDOW_TITLE, MainWindow::OnSetWindowTitle)
 
 EVT_COMMAND(wxID_ANY, wxEVT_REQUEST_RECREATE_CANVAS, MainWindow::OnRequestRecreateCanvas)
 EVT_COMMAND(wxID_ANY, wxEVT_REQUEST_GAME_EXIT, MainWindow::OnRequestGameExit)
+EVT_COMMAND(wxID_ANY, wxEVT_REQUEST_HOME_MENU, MainWindow::OnRequestHomeMenu)
+EVT_END_PROCESS(MAINFRAME_ID_HOME_MENU_PROCESS, MainWindow::OnHomeMenuProcessEnded)
 
 wxEND_EVENT_TABLE()
 
@@ -437,6 +448,15 @@ wxString MainWindow::GetInitialWindowTitle()
 
 void MainWindow::OnClose(wxCloseEvent& event)
 {
+	if (m_home_menu_process)
+	{
+		wxProcess::Kill(m_home_menu_pid, wxSIGTERM, wxKILL_CHILDREN);
+		m_home_menu_process->Detach();
+		delete m_home_menu_process;
+		m_home_menu_process = nullptr;
+		m_home_menu_pid = 0;
+	}
+
 	if (m_debugger_window)
 	{
 		m_debugger_window->CleanupForDestroy();
@@ -2504,6 +2524,101 @@ void MainWindow::OnRequestGameExit(wxCommandEvent& event)
 	{
 		EndEmulation();
 	}
+}
+
+void MainWindow::RequestHomeMenu()
+{
+	wxQueueEvent(this, new wxCommandEvent(wxEVT_REQUEST_HOME_MENU));
+}
+
+void MainWindow::OnRequestHomeMenu(wxCommandEvent& event)
+{
+	if (LaunchSettings::IsSystemOverlayChild())
+	{
+		Close();
+		return;
+	}
+
+	if (!m_game_launched || m_home_menu_process)
+		return;
+
+	const uint64 caller_title_id = CafeSystem::GetForegroundTitleId();
+	const bool japanese = CafeSystem::GetPlatformRegion() == CafeConsoleRegion::JPN;
+	const std::array<uint64, 2> candidates = japanese
+		? std::array<uint64, 2>{0x0005003010010209ULL, 0x000500301001020AULL}
+		: std::array<uint64, 2>{0x000500301001020AULL, 0x0005003010010209ULL};
+
+	uint64 home_menu_title_id = 0;
+	TitleInfo home_menu_info;
+	for (const uint64 title_id : candidates)
+	{
+		if (CafeTitleList::GetFirstByTitleId(title_id, home_menu_info))
+		{
+			home_menu_title_id = title_id;
+			break;
+		}
+	}
+
+	if (home_menu_title_id == 0)
+	{
+		wxMessageBox(_("The Wii U HOME Button Menu title is not installed in the configured MLC."),
+			_("HOME Menu"), wxOK | wxCENTRE | wxICON_ERROR, this);
+		return;
+	}
+
+	auto quote = [](wxString value) {
+		value.Replace("\\", "\\\\");
+		value.Replace("\"", "\\\"");
+		return "\"" + value + "\"";
+	};
+
+	wxString command = quote(wxHelper::FromPath(ActiveSettings::GetExecutablePath()));
+	command += wxString::FromUTF8(fmt::format(" --title-id {:016x}", home_menu_title_id));
+	command += " --mlc " + quote(wxHelper::FromPath(ActiveSettings::GetMlcPath()));
+	command += wxString::FromUTF8(fmt::format(" --account {:08x}", ActiveSettings::GetPersistentId()));
+	command += wxString::FromUTF8(fmt::format(" --system-overlay-child=true --system-overlay-caller-title-id {:016x}", caller_title_id));
+	if (FullscreenEnabled())
+		command += " --fullscreen=true";
+
+	BottomScreen::SetSuspended(true);
+	coreinit::StartBackgroundTransition();
+
+	m_home_menu_process = new wxProcess(this, MAINFRAME_ID_HOME_MENU_PROCESS);
+	m_home_menu_pid = wxExecute(command, wxEXEC_ASYNC, m_home_menu_process);
+	if (m_home_menu_pid == 0)
+	{
+		delete m_home_menu_process;
+		m_home_menu_process = nullptr;
+		BottomScreen::SetSuspended(false);
+		coreinit::StartForegroundTransition();
+		wxMessageBox(_("Cemu could not start the Wii U HOME Button Menu title."),
+			_("HOME Menu"), wxOK | wxCENTRE | wxICON_ERROR, this);
+		return;
+	}
+
+	m_home_menu_pad_was_shown = m_padView && m_padView->IsShown();
+	if (m_padView)
+		m_padView->Hide();
+	Hide();
+}
+
+void MainWindow::OnHomeMenuProcessEnded(wxProcessEvent& event)
+{
+	if (!m_home_menu_process || event.GetPid() != m_home_menu_pid)
+		return;
+
+	delete m_home_menu_process;
+	m_home_menu_process = nullptr;
+	m_home_menu_pid = 0;
+
+	BottomScreen::SetSuspended(false);
+	coreinit::StartForegroundTransition();
+
+	Show();
+	if (m_home_menu_pad_was_shown && m_padView)
+		m_padView->Show();
+	m_home_menu_pad_was_shown = false;
+	Raise();
 }
 
 bool MainWindow::FullscreenEnabled() const
