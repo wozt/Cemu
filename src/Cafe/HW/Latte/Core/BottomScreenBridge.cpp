@@ -95,6 +95,7 @@ namespace
         case BS_BTN_ZR:     return VPADController::kButtonId_ZR;
         case BS_BTN_START:  return VPADController::kButtonId_Plus;
         case BS_BTN_SELECT: return VPADController::kButtonId_Minus;
+        case BS_BTN_HOME:   return VPADController::kButtonId_Home;
         case BS_BTN_UP:     return VPADController::kButtonId_Up;
         case BS_BTN_DOWN:   return VPADController::kButtonId_Down;
         case BS_BTN_LEFT:   return VPADController::kButtonId_Left;

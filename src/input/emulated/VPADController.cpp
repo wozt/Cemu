@@ -86,6 +86,9 @@ void VPADController::VPADRead(VPADStatus_t& status, const BtnRepeat& repeat)
 	}
 
 	m_homebutton_down |= is_home_down();
+#ifdef BOTTOM_SCREEN_ENABLED
+	m_homebutton_down |= BottomScreen::IsButtonHeld(kButtonId_Home);
+#endif
 
 	auto axis = get_axis();
 #ifdef BOTTOM_SCREEN_ENABLED

@@ -11,7 +11,7 @@
 #include "wxgui/helpers/wxHelpers.h"
 #include "wxgui/components/wxInputDraw.h"
 
-constexpr ClassicController::ButtonId g_kFirstColumnItems[] = { ClassicController::kButtonId_A, ClassicController::kButtonId_B, ClassicController::kButtonId_X, ClassicController::kButtonId_Y, ClassicController::kButtonId_L, ClassicController::kButtonId_R, ClassicController::kButtonId_ZL, ClassicController::kButtonId_ZR, ClassicController::kButtonId_Plus, ClassicController::kButtonId_Minus };
+constexpr ClassicController::ButtonId g_kFirstColumnItems[] = { ClassicController::kButtonId_A, ClassicController::kButtonId_B, ClassicController::kButtonId_X, ClassicController::kButtonId_Y, ClassicController::kButtonId_L, ClassicController::kButtonId_R, ClassicController::kButtonId_ZL, ClassicController::kButtonId_ZR, ClassicController::kButtonId_Plus, ClassicController::kButtonId_Minus, ClassicController::kButtonId_Home };
 constexpr ClassicController::ButtonId g_kSecondColumnItems[] = { ClassicController::kButtonId_StickL_Up, ClassicController::kButtonId_StickL_Down, ClassicController::kButtonId_StickL_Left, ClassicController::kButtonId_StickL_Right };
 constexpr ClassicController::ButtonId g_kThirdColumnItems[] = { ClassicController::kButtonId_StickR_Up, ClassicController::kButtonId_StickR_Down, ClassicController::kButtonId_StickR_Left, ClassicController::kButtonId_StickR_Right };
 constexpr ClassicController::ButtonId g_kFourthRowItems[] = { ClassicController::kButtonId_Up, ClassicController::kButtonId_Down, ClassicController::kButtonId_Left, ClassicController::kButtonId_Right };
@@ -34,7 +34,7 @@ ClassicControllerInputPanel::ClassicControllerInputPanel(wxWindow* parent)
 
 	//////////////////////////////////////////////////////////////////
 
-	main_sizer->Add(new wxStaticLine(this, wxID_ANY, wxDefaultPosition, wxDefaultSize, wxVERTICAL), wxGBPosition(0, column + 2), wxGBSpan(11, 1), wxALL | wxEXPAND, 5);
+	main_sizer->Add(new wxStaticLine(this, wxID_ANY, wxDefaultPosition, wxDefaultSize, wxVERTICAL), wxGBPosition(0, column + 2), wxGBSpan(12, 1), wxALL | wxEXPAND, 5);
 
 	row = 0;
 	column += 3;
@@ -55,7 +55,7 @@ ClassicControllerInputPanel::ClassicControllerInputPanel(wxWindow* parent)
 	m_left_draw = new wxInputDraw(this, wxID_ANY, wxDefaultPosition, { 60, 60 });
 	main_sizer->Add(m_left_draw, wxGBPosition(row, column + 1), wxGBSpan(2, 1), wxTOP | wxBOTTOM | wxEXPAND | wxALIGN_CENTER, 5);
 
-	main_sizer->Add(new wxStaticLine(this, wxID_ANY, wxDefaultPosition, wxDefaultSize, wxVERTICAL), wxGBPosition(0, column + 3), wxGBSpan(11, 1), wxALL | wxEXPAND, 5);
+	main_sizer->Add(new wxStaticLine(this, wxID_ANY, wxDefaultPosition, wxDefaultSize, wxVERTICAL), wxGBPosition(0, column + 3), wxGBSpan(12, 1), wxALL | wxEXPAND, 5);
 
 	//////////////////////////////////////////////////////////////////
 
@@ -78,7 +78,7 @@ ClassicControllerInputPanel::ClassicControllerInputPanel(wxWindow* parent)
 	m_right_draw = new wxInputDraw(this, wxID_ANY, wxDefaultPosition, { 60, 60 });
 	main_sizer->Add(m_right_draw, wxGBPosition(row, column + 1), wxGBSpan(2, 1), wxTOP | wxBOTTOM | wxEXPAND | wxALIGN_CENTER, 5);
 
-	main_sizer->Add(new wxStaticLine(this, wxID_ANY, wxDefaultPosition, wxDefaultSize, wxVERTICAL), wxGBPosition(0, column + 3), wxGBSpan(11, 1), wxALL | wxEXPAND, 5);
+	main_sizer->Add(new wxStaticLine(this, wxID_ANY, wxDefaultPosition, wxDefaultSize, wxVERTICAL), wxGBPosition(0, column + 3), wxGBSpan(12, 1), wxALL | wxEXPAND, 5);
 
 	//////////////////////////////////////////////////////////////////
 
