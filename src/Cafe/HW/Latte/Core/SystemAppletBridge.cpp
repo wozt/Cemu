@@ -3,6 +3,7 @@
 #include "Cafe/HW/Latte/Renderer/Renderer.h"
 #include "Cafe/HW/Latte/Core/LatteTexture.h"
 #include "config/CemuConfig.h"
+#include "WindowSystem.h"
 
 #include <imgui.h>
 
@@ -29,7 +30,7 @@ namespace SystemAppletBridge
 {
 namespace
 {
-	constexpr uint32 kMagic = 0x324D4248; // "HBM2"
+	constexpr uint32 kMagic = 0x334D4248; // "HBM3"
 	constexpr uint32 kMaxWidth = 2560;
 	constexpr uint32 kMaxHeight = 1440;
 	constexpr size_t kMaxFrameBytes = (size_t)kMaxWidth * kMaxHeight * 4;
@@ -46,6 +47,16 @@ namespace
 		uint32 reserved[11]{};
 	};
 
+	struct alignas(64) SharedInput
+	{
+		std::atomic<uint32> sequence{ 0 };
+		uint32 x = 0;
+		uint32 y = 0;
+		uint32 pressed = 0;
+		uint32 press_generation = 0;
+		uint32 reserved[11]{};
+	};
+
 	struct alignas(64) SharedFrames
 	{
 		uint32 magic = kMagic;
@@ -53,6 +64,7 @@ namespace
 		uint32 surface_count = (uint32)kSurfaceCount;
 		uint32 reserved[13]{};
 		SharedSurface surfaces[kSurfaceCount];
+		SharedInput input;
 	};
 	constexpr size_t kRegionSize = sizeof(SharedFrames) + kMaxFrameBytes * kSurfaceCount;
 
@@ -84,6 +96,8 @@ namespace
 	Channel g_publisher;
 	std::array<ConsumerSurface, kSurfaceCount> g_consumer_surfaces;
 	std::vector<uint8> g_publish_pixels;
+	bool g_consumer_touch_pressed = false;
+	uint32 g_publisher_press_generation = 0;
 
 	std::string NativeName(std::string_view name)
 	{
@@ -225,6 +239,7 @@ bool StartConsumer(std::string_view name)
 	{
 		OpenChannel(g_consumer, name, true);
 		g_consumer.header = new (g_consumer.region) SharedFrames();
+		g_consumer_touch_pressed = false;
 		for (ConsumerSurface& surface : g_consumer_surfaces)
 			surface.last_sequence = 0;
 		return true;
@@ -241,12 +256,58 @@ void StopConsumer()
 {
 	std::lock_guard lock(g_consumer_mutex);
 	CloseChannel(g_consumer, true);
+	g_consumer_touch_pressed = false;
 	for (ConsumerSurface& surface : g_consumer_surfaces)
 	{
 		surface.last_sequence = 0;
 		surface.rgba.clear();
 		surface.rgb.clear();
 	}
+}
+
+bool SubmitPadTouch(sint32 x, sint32 y, bool pressed)
+{
+	std::lock_guard lock(g_consumer_mutex);
+	if (!g_consumer.header)
+		return false;
+
+	const Vector2i source_size = g_consumer_surfaces[1].texture_size;
+	int window_width = 0;
+	int window_height = 0;
+	WindowSystem::GetPadWindowPhysSize(window_width, window_height);
+	if (source_size.x <= 0 || source_size.y <= 0 || window_width <= 0 || window_height <= 0)
+		return true;
+
+	float image_x = 0.0f;
+	float image_y = 0.0f;
+	float image_width = (float)window_width;
+	float image_height = (float)window_height;
+	if (GetConfig().fullscreen_scaling == kKeepAspectRatio)
+	{
+		const float scale = std::min(image_width / (float)source_size.x,
+			image_height / (float)source_size.y);
+		image_width = source_size.x * scale;
+		image_height = source_size.y * scale;
+		image_x = (window_width - image_width) * 0.5f;
+		image_y = (window_height - image_height) * 0.5f;
+	}
+
+	const float normalized_x = std::clamp((x - image_x) / image_width, 0.0f, 1.0f);
+	const float normalized_y = std::clamp((y - image_y) / image_height, 0.0f, 1.0f);
+	SharedInput& input = g_consumer.header->input;
+	uint32 sequence = input.sequence.load(std::memory_order_relaxed);
+	if (sequence & 1)
+		++sequence;
+	input.sequence.store(sequence + 1, std::memory_order_release);
+	input.x = (uint32)(normalized_x * 65535.0f + 0.5f);
+	input.y = (uint32)(normalized_y * 65535.0f + 0.5f);
+	input.pressed = pressed ? 1 : 0;
+	if (pressed && !g_consumer_touch_pressed)
+		++input.press_generation;
+	g_consumer_touch_pressed = pressed;
+	std::atomic_thread_fence(std::memory_order_release);
+	input.sequence.store(sequence + 2, std::memory_order_release);
+	return true;
 }
 
 bool StartPublisher(std::string_view name)
@@ -260,6 +321,7 @@ bool StartPublisher(std::string_view name)
 			g_publisher.header->capacity != kMaxFrameBytes ||
 			g_publisher.header->surface_count != kSurfaceCount)
 			throw std::runtime_error("incompatible shared frame header");
+		g_publisher_press_generation = g_publisher.header->input.press_generation;
 		return true;
 	}
 	catch (const std::exception& ex)
@@ -268,6 +330,36 @@ bool StartPublisher(std::string_view name)
 		CloseChannel(g_publisher, false);
 		return false;
 	}
+}
+
+bool GetPadTouch(float& x, float& y)
+{
+	std::lock_guard lock(g_publisher_mutex);
+	if (!g_publisher.header)
+		return false;
+
+	SharedInput& input = g_publisher.header->input;
+	for (int attempt = 0; attempt < 3; ++attempt)
+	{
+		const uint32 before = input.sequence.load(std::memory_order_acquire);
+		if (before & 1)
+			continue;
+		const uint32 shared_x = input.x;
+		const uint32 shared_y = input.y;
+		const bool pressed = input.pressed != 0;
+		const uint32 press_generation = input.press_generation;
+		std::atomic_thread_fence(std::memory_order_acquire);
+		const uint32 after = input.sequence.load(std::memory_order_acquire);
+		if (before != after || (after & 1))
+			continue;
+
+		x = shared_x / 65535.0f;
+		y = shared_y / 65535.0f;
+		const bool missed_press = press_generation != g_publisher_press_generation;
+		g_publisher_press_generation = press_generation;
+		return pressed || missed_press;
+	}
+	return false;
 }
 
 void StopPublisher()

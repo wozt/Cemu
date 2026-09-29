@@ -10,6 +10,7 @@
 #include "WindowSystem.h"
 #include "input/InputManager.h"
 #include "Cafe/HW/Latte/Core/Latte.h"
+#include "Cafe/HW/Latte/Core/SystemAppletBridge.h"
 #include "Cafe/CafeSystem.h"
 
 enum ControllerVPADMapping2 : uint32
@@ -219,7 +220,17 @@ void VPADController::update_touch(VPADStatus_t& status)
 
 	auto& instance = InputManager::instance();
 	bool pad_view;
-	if (has_position())
+	float applet_touch_x = 0.0f;
+	float applet_touch_y = 0.0f;
+	if (SystemAppletBridge::GetPadTouch(applet_touch_x, applet_touch_y))
+	{
+		status.tpData.touch = kTpTouchOn;
+		status.tpData.validity = kTpValid;
+		status.tpData.x = (uint16)(applet_touch_x * 3883.0f + 92.0f);
+		status.tpData.y = (uint16)(4095.0f - applet_touch_y * 3694.0f - 254.0f);
+		m_last_touch_position = glm::ivec2{ status.tpData.x, status.tpData.y };
+	}
+	else if (has_position())
 	{
 		const auto mouse = get_position();
 
