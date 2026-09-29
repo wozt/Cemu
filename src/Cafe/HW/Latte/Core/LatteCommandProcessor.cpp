@@ -191,7 +191,7 @@ uint32 LatteCP_readU32Deprc()
 
 		// still no command data available, do some other tasks
 		LatteTiming_HandleTimedVsync();
-		SystemAppletBridge::RenderConsumerFrame();
+		SystemAppletBridge::RenderConsumerFrames();
 		LatteAsyncCommands_checkAndExecute();
 		std::this_thread::yield();
 		performanceMonitor.gpuTime_idleTime.endMeasuring();

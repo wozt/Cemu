@@ -7,6 +7,7 @@
 #include <imgui.h>
 
 #include <algorithm>
+#include <array>
 #include <atomic>
 #include <cerrno>
 #include <cstring>
@@ -28,23 +29,32 @@ namespace SystemAppletBridge
 {
 namespace
 {
-	constexpr uint32 kMagic = 0x314D4248; // "HBM1"
+	constexpr uint32 kMagic = 0x324D4248; // "HBM2"
 	constexpr uint32 kMaxWidth = 2560;
 	constexpr uint32 kMaxHeight = 1440;
 	constexpr size_t kMaxFrameBytes = (size_t)kMaxWidth * kMaxHeight * 4;
+	constexpr size_t kSurfaceCount = 2;
 	static_assert(std::atomic<uint32>::is_always_lock_free,
 		"The system applet channel requires a lock-free 32-bit sequence counter");
 
-	struct alignas(64) SharedFrame
+	struct alignas(64) SharedSurface
 	{
-		uint32 magic = kMagic;
-		uint32 capacity = (uint32)kMaxFrameBytes;
 		std::atomic<uint32> sequence{ 0 };
 		uint32 width = 0;
 		uint32 height = 0;
 		uint32 stride = 0;
-		uint32 reserved = 0;
+		uint32 reserved[11]{};
 	};
+
+	struct alignas(64) SharedFrames
+	{
+		uint32 magic = kMagic;
+		uint32 capacity = (uint32)kMaxFrameBytes;
+		uint32 surface_count = (uint32)kSurfaceCount;
+		uint32 reserved[13]{};
+		SharedSurface surfaces[kSurfaceCount];
+	};
+	constexpr size_t kRegionSize = sizeof(SharedFrames) + kMaxFrameBytes * kSurfaceCount;
 
 	struct Channel
 	{
@@ -55,20 +65,25 @@ namespace
 #else
 		int descriptor = -1;
 #endif
-		SharedFrame* header = nullptr;
-		uint8* pixels = nullptr;
+		SharedFrames* header = nullptr;
+		std::array<uint8*, kSurfaceCount> pixels{};
+	};
+
+	struct ConsumerSurface
+	{
+		uint32 last_sequence = 0;
+		std::vector<uint8> rgba;
+		std::vector<uint8> rgb;
+		ImTextureID texture = nullptr;
+		Vector2i texture_size{};
 	};
 
 	std::mutex g_consumer_mutex;
 	std::mutex g_publisher_mutex;
 	Channel g_consumer;
 	Channel g_publisher;
-	uint32 g_last_sequence = 0;
-	std::vector<uint8> g_rgba;
-	std::vector<uint8> g_rgb;
+	std::array<ConsumerSurface, kSurfaceCount> g_consumer_surfaces;
 	std::vector<uint8> g_publish_pixels;
-	ImTextureID g_texture = nullptr;
-	Vector2i g_texture_size{};
 
 	std::string NativeName(std::string_view name)
 	{
@@ -83,13 +98,13 @@ namespace
 	{
 		const std::string name = channel.name;
 		channel.header = nullptr;
-		channel.pixels = nullptr;
+		channel.pixels.fill(nullptr);
 		if (channel.region)
 		{
 #if BOOST_OS_WINDOWS
 			UnmapViewOfFile(channel.region);
 #else
-			munmap(channel.region, sizeof(SharedFrame) + kMaxFrameBytes);
+			munmap(channel.region, kRegionSize);
 #endif
 			channel.region = nullptr;
 		}
@@ -114,14 +129,13 @@ namespace
 
 	void OpenChannel(Channel& channel, std::string_view name, bool create)
 	{
-		const size_t region_size = sizeof(SharedFrame) + kMaxFrameBytes;
 		channel.name.assign(name);
 #if BOOST_OS_WINDOWS
 		if (create)
 		{
 			SetLastError(ERROR_SUCCESS);
 			channel.mapping = CreateFileMappingA(INVALID_HANDLE_VALUE, nullptr, PAGE_READWRITE,
-				(DWORD)(region_size >> 32), (DWORD)region_size, channel.name.c_str());
+				(DWORD)(kRegionSize >> 32), (DWORD)kRegionSize, channel.name.c_str());
 			if (!channel.mapping || GetLastError() == ERROR_ALREADY_EXISTS)
 				throw std::runtime_error("CreateFileMapping failed");
 		}
@@ -131,7 +145,7 @@ namespace
 			if (!channel.mapping)
 				throw std::runtime_error("OpenFileMapping failed");
 		}
-		channel.region = MapViewOfFile(channel.mapping, FILE_MAP_ALL_ACCESS, 0, 0, region_size);
+		channel.region = MapViewOfFile(channel.mapping, FILE_MAP_ALL_ACCESS, 0, 0, kRegionSize);
 		if (!channel.region)
 			throw std::runtime_error("MapViewOfFile failed");
 #else
@@ -142,9 +156,9 @@ namespace
 			create ? O_CREAT | O_EXCL | O_RDWR : O_RDWR, 0600);
 		if (channel.descriptor < 0)
 			throw std::runtime_error(std::string("shm_open failed: ") + std::strerror(errno));
-		if (create && ftruncate(channel.descriptor, (off_t)region_size) != 0)
+		if (create && ftruncate(channel.descriptor, (off_t)kRegionSize) != 0)
 			throw std::runtime_error(std::string("ftruncate failed: ") + std::strerror(errno));
-		channel.region = mmap(nullptr, region_size, PROT_READ | PROT_WRITE, MAP_SHARED,
+		channel.region = mmap(nullptr, kRegionSize, PROT_READ | PROT_WRITE, MAP_SHARED,
 			channel.descriptor, 0);
 		if (channel.region == MAP_FAILED)
 		{
@@ -152,50 +166,54 @@ namespace
 			throw std::runtime_error(std::string("mmap failed: ") + std::strerror(errno));
 		}
 #endif
-		channel.header = static_cast<SharedFrame*>(channel.region);
-		channel.pixels = reinterpret_cast<uint8*>(channel.header + 1);
+		channel.header = static_cast<SharedFrames*>(channel.region);
+		uint8* pixels = reinterpret_cast<uint8*>(channel.header + 1);
+		for (size_t surface = 0; surface < kSurfaceCount; ++surface)
+			channel.pixels[surface] = pixels + surface * kMaxFrameBytes;
 	}
 
-	bool ReadLatestFrame(uint32& width, uint32& height)
+	bool ReadLatestFrame(size_t surface_index, uint32& width, uint32& height)
 	{
 		if (!g_consumer.header)
 			return false;
+		SharedSurface& shared = g_consumer.header->surfaces[surface_index];
+		ConsumerSurface& local = g_consumer_surfaces[surface_index];
 
 		for (int attempt = 0; attempt < 3; ++attempt)
 		{
-			const uint32 before = g_consumer.header->sequence.load(std::memory_order_acquire);
-			if ((before & 1) || before == g_last_sequence)
+			const uint32 before = shared.sequence.load(std::memory_order_acquire);
+			if ((before & 1) || before == local.last_sequence)
 				return false;
 
-			width = g_consumer.header->width;
-			height = g_consumer.header->height;
-			const uint32 stride = g_consumer.header->stride;
+			width = shared.width;
+			height = shared.height;
+			const uint32 stride = shared.stride;
 			if (width == 0 || height == 0 || width > kMaxWidth || height > kMaxHeight ||
 				stride < width * 4 || (size_t)stride * height > kMaxFrameBytes)
 				return false;
 
-			g_rgba.resize((size_t)width * height * 4);
+			local.rgba.resize((size_t)width * height * 4);
 			for (uint32 row = 0; row < height; ++row)
-				std::memcpy(g_rgba.data() + (size_t)row * width * 4,
-					g_consumer.pixels + (size_t)row * stride, (size_t)width * 4);
+				std::memcpy(local.rgba.data() + (size_t)row * width * 4,
+					g_consumer.pixels[surface_index] + (size_t)row * stride, (size_t)width * 4);
 
 			std::atomic_thread_fence(std::memory_order_acquire);
-			const uint32 after = g_consumer.header->sequence.load(std::memory_order_acquire);
+			const uint32 after = shared.sequence.load(std::memory_order_acquire);
 			if (before == after && !(after & 1))
 			{
-				g_last_sequence = after;
+				local.last_sequence = after;
 				return true;
 			}
 		}
 		return false;
 	}
 
-	void DeleteTexture()
+	void DeleteTexture(ConsumerSurface& surface)
 	{
-		if (g_texture && g_renderer)
-			g_renderer->DeleteTexture(g_texture);
-		g_texture = nullptr;
-		g_texture_size = {};
+		if (surface.texture && g_renderer)
+			g_renderer->DeleteTexture(surface.texture);
+		surface.texture = nullptr;
+		surface.texture_size = {};
 	}
 }
 
@@ -206,8 +224,9 @@ bool StartConsumer(std::string_view name)
 	try
 	{
 		OpenChannel(g_consumer, name, true);
-		g_consumer.header = new (g_consumer.region) SharedFrame();
-		g_last_sequence = 0;
+		g_consumer.header = new (g_consumer.region) SharedFrames();
+		for (ConsumerSurface& surface : g_consumer_surfaces)
+			surface.last_sequence = 0;
 		return true;
 	}
 	catch (const std::exception& ex)
@@ -222,9 +241,12 @@ void StopConsumer()
 {
 	std::lock_guard lock(g_consumer_mutex);
 	CloseChannel(g_consumer, true);
-	g_last_sequence = 0;
-	g_rgba.clear();
-	g_rgb.clear();
+	for (ConsumerSurface& surface : g_consumer_surfaces)
+	{
+		surface.last_sequence = 0;
+		surface.rgba.clear();
+		surface.rgb.clear();
+	}
 }
 
 bool StartPublisher(std::string_view name)
@@ -234,9 +256,10 @@ bool StartPublisher(std::string_view name)
 	try
 	{
 		OpenChannel(g_publisher, name, false);
-		if (g_publisher.header->magic != kMagic || g_publisher.header->capacity != kMaxFrameBytes)
+		if (g_publisher.header->magic != kMagic ||
+			g_publisher.header->capacity != kMaxFrameBytes ||
+			g_publisher.header->surface_count != kSurfaceCount)
 			throw std::runtime_error("incompatible shared frame header");
-		g_publisher.pixels = reinterpret_cast<uint8*>(g_publisher.header + 1);
 		return true;
 	}
 	catch (const std::exception& ex)
@@ -260,11 +283,13 @@ bool IsPublisher()
 	return g_publisher.header != nullptr;
 }
 
-void PublishTvFrame(LatteTextureView* texture_view)
+void PublishFrame(LatteTextureView* texture_view, bool pad_view)
 {
 	std::lock_guard lock(g_publisher_mutex);
 	if (!g_publisher.header || !g_renderer || !texture_view)
 		return;
+	const size_t surface_index = pad_view ? 1 : 0;
+	SharedSurface& shared = g_publisher.header->surfaces[surface_index];
 
 	sint32 width = 0;
 	sint32 height = 0;
@@ -276,80 +301,92 @@ void PublishTvFrame(LatteTextureView* texture_view)
 	if (g_publish_pixels.size() < bytes)
 		return;
 
-	uint32 sequence = g_publisher.header->sequence.load(std::memory_order_relaxed);
+	uint32 sequence = shared.sequence.load(std::memory_order_relaxed);
 	if (sequence & 1)
 		++sequence;
-	g_publisher.header->sequence.store(sequence + 1, std::memory_order_release);
-	g_publisher.header->width = (uint32)width;
-	g_publisher.header->height = (uint32)height;
-	g_publisher.header->stride = (uint32)width * 4;
-	std::memcpy(g_publisher.pixels, g_publish_pixels.data(), bytes);
+	shared.sequence.store(sequence + 1, std::memory_order_release);
+	shared.width = (uint32)width;
+	shared.height = (uint32)height;
+	shared.stride = (uint32)width * 4;
+	std::memcpy(g_publisher.pixels[surface_index], g_publish_pixels.data(), bytes);
 	std::atomic_thread_fence(std::memory_order_release);
-	g_publisher.header->sequence.store(sequence + 2, std::memory_order_release);
+	shared.sequence.store(sequence + 2, std::memory_order_release);
 }
 
-void RenderConsumerFrame()
+namespace
+{
+	void RenderConsumerSurface(size_t surface_index, bool main_window)
+	{
+		ConsumerSurface& surface = g_consumer_surfaces[surface_index];
+		uint32 width = 0;
+		uint32 height = 0;
+		if (!ReadLatestFrame(surface_index, width, height) || !g_renderer)
+			return;
+
+		surface.rgb.resize((size_t)width * height * 3);
+		for (size_t source = 0, destination = 0; source < surface.rgba.size(); source += 4, destination += 3)
+		{
+			surface.rgb[destination + 0] = surface.rgba[source + 0];
+			surface.rgb[destination + 1] = surface.rgba[source + 1];
+			surface.rgb[destination + 2] = surface.rgba[source + 2];
+		}
+
+		const Vector2i size{ (sint32)width, (sint32)height };
+		if (surface.texture && surface.texture_size != size)
+			DeleteTexture(surface);
+
+		if (!g_renderer->BeginFrame(main_window))
+			return;
+		if (!surface.texture)
+		{
+			surface.texture = g_renderer->GenerateTexture(surface.rgb, size);
+			surface.texture_size = size;
+		}
+		else
+		{
+			g_renderer->UpdateTexture(surface.texture, surface.rgb, size);
+		}
+
+		if (!g_renderer->ImguiBegin(main_window))
+			return;
+
+		if (surface.texture)
+		{
+			const ImVec2 display = ImGui::GetIO().DisplaySize;
+			ImVec2 image_min{ 0.0f, 0.0f };
+			ImVec2 image_max = display;
+			if (GetConfig().fullscreen_scaling == kKeepAspectRatio && width && height)
+			{
+				const float scale = std::min(display.x / (float)width, display.y / (float)height);
+				const ImVec2 image_size{ width * scale, height * scale };
+				image_min = { (display.x - image_size.x) * 0.5f, (display.y - image_size.y) * 0.5f };
+				image_max = { image_min.x + image_size.x, image_min.y + image_size.y };
+			}
+			ImGui::GetBackgroundDrawList()->AddImage(surface.texture, image_min, image_max);
+		}
+		g_renderer->ImguiEnd();
+		g_renderer->SwapBuffers(main_window, !main_window);
+	}
+}
+
+void RenderConsumerFrames()
 {
 	std::lock_guard lock(g_consumer_mutex);
 	if (!g_consumer.header)
 	{
-		DeleteTexture();
+		for (ConsumerSurface& surface : g_consumer_surfaces)
+			DeleteTexture(surface);
 		return;
 	}
 
-	uint32 width = 0;
-	uint32 height = 0;
-	if (!ReadLatestFrame(width, height) || !g_renderer)
-		return;
-
-	g_rgb.resize((size_t)width * height * 3);
-	for (size_t source = 0, destination = 0; source < g_rgba.size(); source += 4, destination += 3)
-	{
-		g_rgb[destination + 0] = g_rgba[source + 0];
-		g_rgb[destination + 1] = g_rgba[source + 1];
-		g_rgb[destination + 2] = g_rgba[source + 2];
-	}
-
-	const Vector2i size{ (sint32)width, (sint32)height };
-	if (g_texture && g_texture_size != size)
-		DeleteTexture();
-
-	if (!g_renderer->BeginFrame(true))
-		return;
-	if (!g_texture)
-	{
-		g_texture = g_renderer->GenerateTexture(g_rgb, size);
-		g_texture_size = size;
-	}
-	else
-	{
-		g_renderer->UpdateTexture(g_texture, g_rgb, size);
-	}
-
-	if (!g_renderer->ImguiBegin(true))
-		return;
-
-	if (g_texture)
-	{
-		const ImVec2 display = ImGui::GetIO().DisplaySize;
-		ImVec2 image_min{ 0.0f, 0.0f };
-		ImVec2 image_max = display;
-		if (GetConfig().fullscreen_scaling == kKeepAspectRatio && width && height)
-		{
-			const float scale = std::min(display.x / (float)width, display.y / (float)height);
-			const ImVec2 image_size{ width * scale, height * scale };
-			image_min = { (display.x - image_size.x) * 0.5f, (display.y - image_size.y) * 0.5f };
-			image_max = { image_min.x + image_size.x, image_min.y + image_size.y };
-		}
-		ImGui::GetBackgroundDrawList()->AddImage(g_texture, image_min, image_max);
-	}
-	g_renderer->ImguiEnd();
-	g_renderer->SwapBuffers(true, false);
+	RenderConsumerSurface(0, true);
+	RenderConsumerSurface(1, false);
 }
 
 void RendererShutdown()
 {
 	std::lock_guard lock(g_consumer_mutex);
-	DeleteTexture();
+	for (ConsumerSurface& surface : g_consumer_surfaces)
+		DeleteTexture(surface);
 }
 }

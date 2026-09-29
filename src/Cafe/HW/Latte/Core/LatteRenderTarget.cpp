@@ -968,8 +968,7 @@ void LatteRenderTarget_copyToBackbuffer(LatteTextureView* textureView, bool isPa
 	cemu_assert(shader);
 	g_renderer->DrawBackbufferQuad(textureView, shader, filter==LatteTextureView::MagFilter::kLinear, imageX, imageY, imageWidth, imageHeight, isPadView, clearBackground);
 	g_renderer->HandleScreenshotRequest(textureView, isPadView);
-	if (!isPadView)
-		SystemAppletBridge::PublishTvFrame(textureView);
+	SystemAppletBridge::PublishFrame(textureView, isPadView);
 
 #ifdef BOTTOM_SCREEN_ENABLED
 	// The GamePad image has just been drawn and Cemu has finished with the

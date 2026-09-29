@@ -428,6 +428,9 @@ namespace snd_core
 	/* AX output */
 
 	uint32 numQueuedFramesSndGeneric = 0;
+	static bool systemAppletMuted = false;
+	static sint32 systemAppletTvVolume = 0;
+	static sint32 systemAppletPadVolume = 0;
 
 	void AXOut_init()
 	{
@@ -506,6 +509,37 @@ namespace snd_core
 				g_portalAudio->Play();
 			else
 				g_portalAudio->Stop();
+		}
+	}
+
+	void AXOut_setSystemAppletMuted(bool muted)
+	{
+		std::unique_lock lock(g_audioMutex);
+		if (systemAppletMuted == muted)
+			return;
+
+		systemAppletMuted = muted;
+		if (muted)
+		{
+			systemAppletTvVolume = GetConfig().tv_volume;
+			systemAppletPadVolume = GetConfig().pad_volume;
+			if (g_tvAudio)
+			{
+				systemAppletTvVolume = g_tvAudio->GetVolume();
+				g_tvAudio->SetVolume(0);
+			}
+			if (g_padAudio)
+			{
+				systemAppletPadVolume = g_padAudio->GetVolume();
+				g_padAudio->SetVolume(0);
+			}
+		}
+		else
+		{
+			if (g_tvAudio)
+				g_tvAudio->SetVolume(systemAppletTvVolume);
+			if (g_padAudio)
+				g_padAudio->SetVolume(systemAppletPadVolume);
 		}
 	}
 

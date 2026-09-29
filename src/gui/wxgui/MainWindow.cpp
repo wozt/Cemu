@@ -61,6 +61,7 @@
 #include "Cafe/OS/libs/nfc/nfc.h"
 #include "Cafe/OS/libs/swkbd/swkbd.h"
 #include "Cafe/OS/libs/sysapp/sysapp.h"
+#include "Cafe/OS/libs/snd_core/ax.h"
 #include "Cafe/HW/Latte/Core/BottomScreenBridge.h"
 #include "Cafe/HW/Latte/Core/SystemAppletBridge.h"
 
@@ -2578,11 +2579,7 @@ void MainWindow::OnRequestHomeMenu(wxCommandEvent& event)
 	}
 
 	if (home_menu_title_id == 0)
-	{
-		wxMessageBox(_("The Wii U HOME Button Menu title is not installed in the configured MLC."),
-			_("HOME Menu"), wxOK | wxCENTRE | wxICON_ERROR, this);
 		return;
-	}
 
 	auto quote = [](wxString value) {
 		value.Replace("\\", "\\\\");
@@ -2606,6 +2603,7 @@ void MainWindow::OnRequestHomeMenu(wxCommandEvent& event)
 	command += " --system-applet-channel " + quote(wxString::FromUTF8(applet_channel));
 
 	BottomScreen::SetSuspended(true);
+	snd_core::AXOut_setSystemAppletMuted(true);
 	coreinit::StartBackgroundTransition();
 
 	m_home_menu_process = new wxProcess(this, MAINFRAME_ID_HOME_MENU_PROCESS);
@@ -2616,6 +2614,7 @@ void MainWindow::OnRequestHomeMenu(wxCommandEvent& event)
 		m_home_menu_process = nullptr;
 		SystemAppletBridge::StopConsumer();
 		BottomScreen::SetSuspended(false);
+		snd_core::AXOut_setSystemAppletMuted(false);
 		coreinit::StartForegroundTransition();
 		wxMessageBox(_("Cemu could not start the Wii U HOME Button Menu title."),
 			_("HOME Menu"), wxOK | wxCENTRE | wxICON_ERROR, this);
@@ -2623,8 +2622,6 @@ void MainWindow::OnRequestHomeMenu(wxCommandEvent& event)
 	}
 
 	m_home_menu_pad_was_shown = m_padView && m_padView->IsShown();
-	if (m_padView)
-		m_padView->Hide();
 }
 
 void MainWindow::OnHomeMenuProcessEnded(wxProcessEvent& event)
@@ -2638,14 +2635,19 @@ void MainWindow::OnHomeMenuProcessEnded(wxProcessEvent& event)
 
 	SystemAppletBridge::StopConsumer();
 	BottomScreen::SetSuspended(false);
+	if (m_home_menu_pad_was_shown && m_padView && !m_padView->IsShown())
+		m_padView->Show();
 	if (event.GetExitCode() == LaunchSettings::SYSTEM_OVERLAY_EXIT_LAUNCH_WII_U_MENU)
 	{
 		m_home_menu_pad_was_shown = false;
-		if (!LaunchWiiUMenu())
+		const bool launched = LaunchWiiUMenu();
+		snd_core::AXOut_setSystemAppletMuted(false);
+		if (!launched)
 			coreinit::StartForegroundTransition();
 		return;
 	}
 
+	snd_core::AXOut_setSystemAppletMuted(false);
 	coreinit::StartForegroundTransition();
 	if (m_home_menu_pad_was_shown && m_padView)
 		m_padView->Show();

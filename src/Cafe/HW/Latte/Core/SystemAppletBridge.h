@@ -15,9 +15,9 @@ namespace SystemAppletBridge
 	bool StartPublisher(std::string_view name);
 	void StopPublisher();
 	bool IsPublisher();
-	void PublishTvFrame(LatteTextureView* texture_view);
+	void PublishFrame(LatteTextureView* texture_view, bool pad_view);
 
 	// Called only on the Latte thread of the foreground Cemu.
-	void RenderConsumerFrame();
+	void RenderConsumerFrames();
 	void RendererShutdown();
 }

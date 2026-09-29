@@ -391,6 +391,7 @@ namespace snd_core
 	void AXOut_init();
 	void AXOut_reset();
 	void AXOut_update();
+	void AXOut_setSystemAppletMuted(bool muted);
 
 	COSModule* GetModuleSndCore1();
 	COSModule* GetModuleSndCore2();
