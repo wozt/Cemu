@@ -4,6 +4,7 @@
 #include "Cafe/HW/Latte/Core/LatteDraw.h"
 #include "Cafe/HW/Latte/Core/LatteShader.h"
 #include "Cafe/HW/Latte/Core/LatteAsyncCommands.h"
+#include "Cafe/HW/Latte/Core/SystemAppletBridge.h"
 #include "Cafe/GameProfile/GameProfile.h"
 #include "Cafe/GraphicPack/GraphicPack2.h"
 #include "WindowSystem.h"
@@ -248,6 +249,8 @@ bool Latte_GetStopSignal()
 
 void LatteThread_Exit()
 {
+	SystemAppletBridge::RendererShutdown();
+	SystemAppletBridge::StopPublisher();
 	if (g_renderer)
 		g_renderer->Shutdown();
     // clean up vertex/uniform cache

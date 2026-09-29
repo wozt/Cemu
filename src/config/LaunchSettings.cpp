@@ -86,11 +86,7 @@ std::optional<int> LaunchSettings::HandleCommandline(const std::vector<std::wstr
 		("legacy", po::value<bool>()->implicit_value(true), "Intel legacy graphic mode")
 		("system-overlay-child", po::value<bool>()->implicit_value(true), "Run a Wii U system overlay for another Cemu instance")
 		("system-overlay-caller-title-id", po::value<std::string>(), "Title ID of the application below a system overlay")
-		("system-overlay-parent-window", po::value<std::string>(), "Native window used to embed a system overlay")
-		("system-overlay-x", po::value<int>(), "System overlay fallback X coordinate")
-		("system-overlay-y", po::value<int>(), "System overlay fallback Y coordinate")
-		("system-overlay-width", po::value<int>(), "System overlay width")
-		("system-overlay-height", po::value<int>(), "System overlay height")
+		("system-applet-channel", po::value<std::string>(), "Shared compositor channel for a Wii U system applet")
 		("ppcrec-lower-addr", po::value<std::string>(), "For debugging: Lower address allowed for PPC recompilation")
 		("ppcrec-upper-addr", po::value<std::string>(), "For debugging: Upper address allowed for PPC recompilation");
 
@@ -219,27 +215,8 @@ std::optional<int> LaunchSettings::HandleCommandline(const std::vector<std::wstr
 				return 1;
 			}
 		}
-		if (vm.count("system-overlay-parent-window"))
-		{
-			const auto window = vm["system-overlay-parent-window"].as<std::string>();
-			try
-			{
-				s_system_overlay_parent_window = static_cast<uintptr_t>(std::stoull(window, nullptr, 16));
-			}
-			catch (const std::exception&)
-			{
-				std::cerr << "Expected system overlay parent window as an unsigned hexadecimal value\n";
-				return 1;
-			}
-		}
-		if (vm.count("system-overlay-x"))
-			s_system_overlay_x = vm["system-overlay-x"].as<int>();
-		if (vm.count("system-overlay-y"))
-			s_system_overlay_y = vm["system-overlay-y"].as<int>();
-		if (vm.count("system-overlay-width"))
-			s_system_overlay_width = vm["system-overlay-width"].as<int>();
-		if (vm.count("system-overlay-height"))
-			s_system_overlay_height = vm["system-overlay-height"].as<int>();
+		if (vm.count("system-applet-channel"))
+			s_system_applet_channel = vm["system-applet-channel"].as<std::string>();
 
 		if (vm.count("forward-console-logging"))
 		{

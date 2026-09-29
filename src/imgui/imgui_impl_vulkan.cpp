@@ -109,6 +109,7 @@ struct ImGuiTexture
     VkDescriptorSet descriptor_set;
     VkBuffer uploadBuffer;
     VkDeviceMemory uploadBufferMemory;
+    Vector2i size;
 };
 
 
@@ -1460,6 +1461,7 @@ ImTextureID ImGui_ImplVulkan_GenerateTexture(VkCommandBuffer commandBuffer, cons
             vkCmdPipelineBarrier(commandBuffer, VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT, 0, 0, NULL, 0, NULL, 1, use_barrier);
         }
 
+        texture->size = size;
         return (ImTextureID)texture;
     }
     catch (const std::exception & ex)
@@ -1467,6 +1469,60 @@ ImTextureID ImGui_ImplVulkan_GenerateTexture(VkCommandBuffer commandBuffer, cons
         cemuLog_log(LogType::Force, "can't generate imgui texture: {}", ex.what());
         return nullptr;
     }
+}
+
+bool ImGui_ImplVulkan_UpdateTexture(VkCommandBuffer commandBuffer, ImTextureID id, const std::vector<uint8>& data, const Vector2i& size)
+{
+    auto* texture = (ImGuiTexture*)id;
+    if (!texture || texture->size != size || data.size() < (size_t)size.x * size.y * 4)
+        return false;
+
+    char* map = nullptr;
+    VkResult err = vkMapMemory(g_VulkanInitInfo.Device, texture->uploadBufferMemory, 0, data.size(), 0, (void**)&map);
+    check_vk_result(err);
+    if (err != VK_SUCCESS)
+        return false;
+    memcpy(map, data.data(), data.size());
+    VkMappedMemoryRange range{};
+    range.sType = VK_STRUCTURE_TYPE_MAPPED_MEMORY_RANGE;
+    range.memory = texture->uploadBufferMemory;
+    range.size = data.size();
+    err = vkFlushMappedMemoryRanges(g_VulkanInitInfo.Device, 1, &range);
+    check_vk_result(err);
+    vkUnmapMemory(g_VulkanInitInfo.Device, texture->uploadBufferMemory);
+    if (err != VK_SUCCESS)
+        return false;
+
+    VkImageMemoryBarrier to_copy{};
+    to_copy.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
+    to_copy.srcAccessMask = VK_ACCESS_SHADER_READ_BIT;
+    to_copy.dstAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
+    to_copy.oldLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+    to_copy.newLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
+    to_copy.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+    to_copy.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+    to_copy.image = texture->image;
+    to_copy.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+    to_copy.subresourceRange.levelCount = 1;
+    to_copy.subresourceRange.layerCount = 1;
+    vkCmdPipelineBarrier(commandBuffer, VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT,
+        VK_PIPELINE_STAGE_TRANSFER_BIT, 0, 0, nullptr, 0, nullptr, 1, &to_copy);
+
+    VkBufferImageCopy copy{};
+    copy.imageSubresource.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+    copy.imageSubresource.layerCount = 1;
+    copy.imageExtent = { (uint32)size.x, (uint32)size.y, 1 };
+    vkCmdCopyBufferToImage(commandBuffer, texture->uploadBuffer, texture->image,
+        VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &copy);
+
+    VkImageMemoryBarrier to_sample = to_copy;
+    to_sample.srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
+    to_sample.dstAccessMask = VK_ACCESS_SHADER_READ_BIT;
+    to_sample.oldLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
+    to_sample.newLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+    vkCmdPipelineBarrier(commandBuffer, VK_PIPELINE_STAGE_TRANSFER_BIT,
+        VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT, 0, 0, nullptr, 0, nullptr, 1, &to_sample);
+    return true;
 }
 
 void ImGui_ImplVulkan_DeleteTexture(ImTextureID id)

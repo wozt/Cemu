@@ -41,28 +41,6 @@
 #if BOOST_OS_LINUX && defined(ENABLE_FERAL_GAMEMODE)
 #include <gamemode_client.h>
 #endif
-#if BOOST_OS_LINUX || BOOST_OS_BSD
-#include <X11/Xlib.h>
-// wxWidgets removes these legacy Xlib macros from its public namespace,
-// while the XShape header still uses them in its declarations.
-#ifndef Bool
-#define CEMU_RESTORE_X11_BOOL
-#define Bool int
-#endif
-#ifndef Status
-#define CEMU_RESTORE_X11_STATUS
-#define Status int
-#endif
-#include <X11/extensions/shape.h>
-#ifdef CEMU_RESTORE_X11_BOOL
-#undef Bool
-#undef CEMU_RESTORE_X11_BOOL
-#endif
-#ifdef CEMU_RESTORE_X11_STATUS
-#undef Status
-#undef CEMU_RESTORE_X11_STATUS
-#endif
-#endif
 #if ( BOOST_OS_LINUX || BOOST_OS_BSD ) && HAS_WAYLAND
 #include "helpers/wxWayland.h"
 #endif
@@ -84,6 +62,7 @@
 #include "Cafe/OS/libs/swkbd/swkbd.h"
 #include "Cafe/OS/libs/sysapp/sysapp.h"
 #include "Cafe/HW/Latte/Core/BottomScreenBridge.h"
+#include "Cafe/HW/Latte/Core/SystemAppletBridge.h"
 
 #include "Cafe/HW/Latte/Renderer/Renderer.h" // For renderer API checks
 
@@ -669,7 +648,7 @@ bool MainWindow::FileLoad(const fs::path launchPath, wxLaunchGameEvent::INITIATE
 	CafeSystem::LaunchForegroundTitle();
 	RecreateMenu();
 	if (LaunchSettings::IsSystemOverlayChild())
-		ConfigureSystemOverlayWindow();
+		ConfigureSystemAppletWindow();
 	UpdateChildWindowTitleRunningState();
 
 	return true;
@@ -2610,25 +2589,21 @@ void MainWindow::OnRequestHomeMenu(wxCommandEvent& event)
 		value.Replace("\"", "\\\"");
 		return "\"" + value + "\"";
 	};
+	const std::string applet_channel = fmt::format("cemu_hbm_{}_{}", wxGetProcessId(),
+		std::chrono::steady_clock::now().time_since_epoch().count());
+	if (!SystemAppletBridge::StartConsumer(applet_channel))
+	{
+		wxMessageBox(_("Cemu could not create the Wii U system applet compositor."),
+			_("HOME Menu"), wxOK | wxCENTRE | wxICON_ERROR, this);
+		return;
+	}
 
 	wxString command = quote(wxHelper::FromPath(ActiveSettings::GetExecutablePath()));
 	command += wxString::FromUTF8(fmt::format(" --title-id {:016x}", home_menu_title_id));
 	command += " --mlc " + quote(wxHelper::FromPath(ActiveSettings::GetMlcPath()));
 	command += wxString::FromUTF8(fmt::format(" --account {:08x}", ActiveSettings::GetPersistentId()));
 	command += wxString::FromUTF8(fmt::format(" --system-overlay-child=true --system-overlay-caller-title-id {:016x}", caller_title_id));
-	const wxRect overlay_rect = m_render_canvas->GetScreenRect();
-	command += wxString::FromUTF8(fmt::format(" --system-overlay-x {} --system-overlay-y {} --system-overlay-width {} --system-overlay-height {}",
-		overlay_rect.x, overlay_rect.y, overlay_rect.width, overlay_rect.height));
-	const auto render_window = initHandleContextFromWxWidgetsWindow(m_render_canvas);
-	if ((render_window.backend == WindowSystem::WindowHandleInfo::Backend::X11 ||
-		render_window.backend == WindowSystem::WindowHandleInfo::Backend::Windows) &&
-		render_window.surface)
-	{
-		command += wxString::FromUTF8(fmt::format(" --system-overlay-parent-window {:x}",
-			reinterpret_cast<uintptr_t>(render_window.surface)));
-	}
-	if (FullscreenEnabled())
-		command += " --fullscreen=true";
+	command += " --system-applet-channel " + quote(wxString::FromUTF8(applet_channel));
 
 	BottomScreen::SetSuspended(true);
 	coreinit::StartBackgroundTransition();
@@ -2639,6 +2614,7 @@ void MainWindow::OnRequestHomeMenu(wxCommandEvent& event)
 	{
 		delete m_home_menu_process;
 		m_home_menu_process = nullptr;
+		SystemAppletBridge::StopConsumer();
 		BottomScreen::SetSuspended(false);
 		coreinit::StartForegroundTransition();
 		wxMessageBox(_("Cemu could not start the Wii U HOME Button Menu title."),
@@ -2660,6 +2636,7 @@ void MainWindow::OnHomeMenuProcessEnded(wxProcessEvent& event)
 	m_home_menu_process = nullptr;
 	m_home_menu_pid = 0;
 
+	SystemAppletBridge::StopConsumer();
 	BottomScreen::SetSuspended(false);
 	if (event.GetExitCode() == LaunchSettings::SYSTEM_OVERLAY_EXIT_LAUNCH_WII_U_MENU)
 	{
@@ -2676,114 +2653,30 @@ void MainWindow::OnHomeMenuProcessEnded(wxProcessEvent& event)
 	Raise();
 }
 
-void MainWindow::ConfigureSystemOverlayWindow()
+void MainWindow::ConfigureSystemAppletWindow()
 {
-	const int width = LaunchSettings::GetSystemOverlayWidth().value_or(1280);
-	const int height = LaunchSettings::GetSystemOverlayHeight().value_or(720);
-	const int x = LaunchSettings::GetSystemOverlayX().value_or(0);
-	const int y = LaunchSettings::GetSystemOverlayY().value_or(0);
 	SetMenuVisible(false);
-	SetPosition({ x, y });
-	SetClientSize(width, height);
+	SetClientSize(1, 1);
+	SetPosition({ -32000, -32000 });
 	Layout();
 	if (m_padView)
 	{
+		// Keep a drawable alive for the emulated GamePad output and remote
+		// input path, but do not expose the helper process as a second window.
+		// PadViewFrame normally enforces 320x180; remove that minimum before
+		// shrinking it so a window manager cannot leave a visible sliver.
 		m_padView->Restore();
-		m_padView->SetPosition({ x, y });
-		m_padView->SetSize(width, height);
+		m_padView->SetMinClientSize({ 1, 1 });
+		m_padView->SetClientSize(1, 1);
+		m_padView->SetPosition({ -32000, -32000 });
 	}
-
-	if (const auto parent_window = LaunchSettings::GetSystemOverlayParentWindow())
+	if (!LaunchSettings::GetSystemAppletChannel() ||
+		!SystemAppletBridge::StartPublisher(*LaunchSettings::GetSystemAppletChannel()))
 	{
-#if BOOST_OS_WINDOWS
-		HWND child = reinterpret_cast<HWND>(m_render_canvas->GetHWND());
-		HWND parent = reinterpret_cast<HWND>(*parent_window);
-		LONG_PTR style = GetWindowLongPtr(child, GWL_STYLE);
-		style &= ~WS_POPUP;
-		style |= WS_CHILD;
-		SetWindowLongPtr(child, GWL_STYLE, style);
-		SetParent(child, parent);
-		SetWindowPos(child, HWND_TOP, 0, 0, width, height, SWP_FRAMECHANGED | SWP_SHOWWINDOW);
-		SetFocus(child);
-		auto conceal_top_level = [x, y](HWND window)
-		{
-			RECT rect{};
-			GetWindowRect(window, &rect);
-			const int hidden_x = x - std::max(rect.right - rect.left, 1L) - 4096;
-			SetWindowPos(window, HWND_BOTTOM, hidden_x, y, 0, 0,
-				SWP_NOSIZE | SWP_NOACTIVATE);
-		};
-		conceal_top_level(reinterpret_cast<HWND>(GetHWND()));
-		if (m_padView)
-			conceal_top_level(reinterpret_cast<HWND>(m_padView->GetHWND()));
-		return;
-#elif BOOST_OS_LINUX || BOOST_OS_BSD
-		if (g_window_info.window_main.backend == WindowSystem::WindowHandleInfo::Backend::X11)
-		{
-			Display* display = static_cast<Display*>(g_window_info.window_main.display);
-			const auto render_window = initHandleContextFromWxWidgetsWindow(m_render_canvas);
-			const ::Window child = static_cast<::Window>(reinterpret_cast<uintptr_t>(render_window.surface));
-			const ::Window parent = static_cast<::Window>(*parent_window);
-			XReparentWindow(display, child, parent, 0, 0);
-			XMoveResizeWindow(display, child, 0, 0, width, height);
-			XMapRaised(display, child);
-			XSetInputFocus(display, child, RevertToParent, CurrentTime);
-			// Window managers may wrap GTK top-levels in their own native frame.
-			// Lower that frame, not merely the client inside it. The reparented
-			// TV render surface is no longer part of this tree. The pad top-level
-			// remains mapped so OpenGL keeps producing the DRC image, but it too
-			// stays behind the caller.
-			auto conceal_top_level = [display, x, y](void* surface)
-			{
-				if (!surface)
-					return;
-				::Window top_level = static_cast<::Window>(reinterpret_cast<uintptr_t>(surface));
-				while (true)
-				{
-				::Window root = 0;
-				::Window native_parent = 0;
-				::Window* children = nullptr;
-				unsigned int child_count = 0;
-				if (!XQueryTree(display, top_level, &root, &native_parent, &children, &child_count))
-					break;
-				if (children)
-					XFree(children);
-				if (!native_parent || native_parent == root)
-					break;
-				top_level = native_parent;
-				}
-				// Keep the DRC top-level mapped, and do not resize it: OpenGL
-				// needs that native canvas intact to produce the second-screen
-				// image. Move the WM frame away as a fallback, then give it an
-				// empty bounding shape so WMs which keep an off-screen grab strip
-				// visible cannot leak any part around the embedded TV.
-				XWindowAttributes attributes{};
-				const int hidden_x = XGetWindowAttributes(display, top_level, &attributes)
-					? x - std::max(attributes.width, 1) - 4096
-					: x - 8192;
-				XMoveWindow(display, top_level, hidden_x, y);
-				int shape_event = 0;
-				int shape_error = 0;
-				if (XShapeQueryExtension(display, &shape_event, &shape_error))
-					XShapeCombineRectangles(display, top_level, ShapeBounding,
-						0, 0, nullptr, 0, ShapeSet, Unsorted);
-				XLowerWindow(display, top_level);
-			};
-			conceal_top_level(g_window_info.window_main.surface);
-			if (m_padView)
-				conceal_top_level(g_window_info.window_pad.surface);
-			XFlush(display);
-			return;
-		}
-#endif
+		wxMessageBox(_("Cemu could not connect to the Wii U system applet compositor."),
+			_("HOME Menu"), wxOK | wxCENTRE | wxICON_ERROR, this);
+		Close();
 	}
-
-	// Wayland and Cocoa don't allow cross-process native reparenting. A
-	// decoration-free surface in the exact render rectangle is the closest
-	// equivalent and leaves the suspended frame directly underneath.
-	SetPosition({ x, y });
-	SetClientSize(width, height);
-	Raise();
 }
 
 bool MainWindow::LaunchWiiUMenu()

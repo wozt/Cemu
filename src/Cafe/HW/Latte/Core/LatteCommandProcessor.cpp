@@ -5,6 +5,7 @@
 #include "Cafe/HW/Latte/Core/Latte.h"
 #include "Cafe/HW/Latte/Core/LatteShader.h"
 #include "Cafe/HW/Latte/Core/LatteAsyncCommands.h"
+#include "Cafe/HW/Latte/Core/SystemAppletBridge.h"
 #include "Cafe/HW/Latte/Core/LattePerformanceMonitor.h"
 #include "Cafe/HW/Latte/Core/LatteIndices.h"
 #include "Cafe/HW/Latte/Core/LatteBufferCache.h"
@@ -190,6 +191,7 @@ uint32 LatteCP_readU32Deprc()
 
 		// still no command data available, do some other tasks
 		LatteTiming_HandleTimedVsync();
+		SystemAppletBridge::RenderConsumerFrame();
 		LatteAsyncCommands_checkAndExecute();
 		std::this_thread::yield();
 		performanceMonitor.gpuTime_idleTime.endMeasuring();

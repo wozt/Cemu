@@ -211,6 +211,16 @@ ImTextureID OpenGLRenderer::GenerateTexture(const std::vector<uint8>& data, cons
 	return (ImTextureID)(uintptr_t)textureId;
 }
 
+bool OpenGLRenderer::UpdateTexture(ImTextureID id, const std::vector<uint8>& data, const Vector2i& size)
+{
+	if (!id || size.x <= 0 || size.y <= 0 || data.size() < (size_t)size.x * size.y * 3)
+		return false;
+	glBindTexture(GL_TEXTURE_2D, (GLuint)(uintptr_t)id);
+	glPixelStorei(GL_UNPACK_ALIGNMENT, 1);
+	glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, size.x, size.y, GL_RGB, GL_UNSIGNED_BYTE, data.data());
+	return true;
+}
+
 void OpenGLRenderer::DeleteTexture(ImTextureID id)
 {
 	if (id)

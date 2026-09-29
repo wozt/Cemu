@@ -4,6 +4,7 @@
 #include "Cafe/HW/Latte/Core/LatteDraw.h"
 #include "Cafe/HW/Latte/Core/LatteShader.h"
 #include "Cafe/HW/Latte/Core/LatteOverlay.h"
+#include "Cafe/HW/Latte/Core/SystemAppletBridge.h"
 #include "Cafe/HW/Latte/Core/LatteBufferCache.h"
 #include "Cafe/HW/Latte/Core/LatteTexture.h"
 #include "Cafe/HW/Latte/Core/LatteCachedFBO.h"
@@ -967,6 +968,8 @@ void LatteRenderTarget_copyToBackbuffer(LatteTextureView* textureView, bool isPa
 	cemu_assert(shader);
 	g_renderer->DrawBackbufferQuad(textureView, shader, filter==LatteTextureView::MagFilter::kLinear, imageX, imageY, imageWidth, imageHeight, isPadView, clearBackground);
 	g_renderer->HandleScreenshotRequest(textureView, isPadView);
+	if (!isPadView)
+		SystemAppletBridge::PublishTvFrame(textureView);
 
 #ifdef BOTTOM_SCREEN_ENABLED
 	// The GamePad image has just been drawn and Cemu has finished with the

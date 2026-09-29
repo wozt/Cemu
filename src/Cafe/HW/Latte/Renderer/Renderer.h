@@ -98,6 +98,7 @@ public:
 	virtual bool ImguiBegin(bool mainWindow);
 	virtual void ImguiEnd() = 0;
 	virtual ImTextureID GenerateTexture(const std::vector<uint8>& data, const Vector2i& size) = 0;
+	virtual bool UpdateTexture(ImTextureID id, const std::vector<uint8>& data, const Vector2i& size) = 0;
 	virtual void DeleteTexture(ImTextureID id) = 0;
 	virtual void DeleteFontTextures() = 0;
 

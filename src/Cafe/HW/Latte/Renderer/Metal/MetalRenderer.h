@@ -191,6 +191,7 @@ public:
 	bool ImguiBegin(bool mainWindow) override;
 	void ImguiEnd() override;
 	ImTextureID GenerateTexture(const std::vector<uint8>& data, const Vector2i& size) override;
+	bool UpdateTexture(ImTextureID id, const std::vector<uint8>& data, const Vector2i& size) override;
 	void DeleteTexture(ImTextureID id) override;
 	void DeleteFontTextures() override;
 

@@ -121,6 +121,8 @@ add_library(CemuCafe
   HW/Latte/Core/LatteRenderTarget.cpp
   HW/Latte/Core/BottomScreenBridge.cpp
   HW/Latte/Core/BottomScreenBridge.h
+  HW/Latte/Core/SystemAppletBridge.cpp
+  HW/Latte/Core/SystemAppletBridge.h
   HW/Latte/Core/LatteRingBuffer.cpp
   HW/Latte/Core/LatteRingBuffer.h
   HW/Latte/Core/LatteShaderAssembly.h
