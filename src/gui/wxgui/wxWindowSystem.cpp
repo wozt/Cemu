@@ -332,6 +332,13 @@ void WindowSystem::NotifyGameExited()
 		g_mainFrame->RestoreSettingsAfterGameExited();
 }
 
+void WindowSystem::RequestHomeMenu()
+{
+	std::shared_lock lock(g_mutex);
+	if (g_mainFrame)
+		g_mainFrame->RequestHomeMenu();
+}
+
 void WindowSystem::RefreshGameList()
 {
 	std::shared_lock lock(g_mutex);

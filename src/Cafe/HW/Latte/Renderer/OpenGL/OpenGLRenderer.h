@@ -41,6 +41,7 @@ public:
 	bool ImguiBegin(bool mainWindow) override;
 	void ImguiEnd() override;
 	ImTextureID GenerateTexture(const std::vector<uint8>& data, const Vector2i& size) override;
+	bool UpdateTexture(ImTextureID id, const std::vector<uint8>& data, const Vector2i& size) override;
 	void DeleteTexture(ImTextureID id) override;
 	void DeleteFontTextures() override;
 
@@ -57,6 +58,8 @@ public:
 	void DrawEmptyFrame(bool mainWindow) override;
 	void ClearColorbuffer(bool padView) override;
 	void HandleScreenshotRequest(LatteTextureView* texView, bool padView) override;
+	bool ReadbackViewRGBA(LatteTextureView* texView, std::vector<uint8>& out,
+	                      sint32& width, sint32& height) override;
 
 	void DrawBackbufferQuad(LatteTextureView* texView, RendererOutputShader* shader, bool useLinearTexFilter, sint32 imageX, sint32 imageY, sint32 imageWidth, sint32 imageHeight, bool padView, bool clearBackground) override;
 

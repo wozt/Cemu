@@ -5,6 +5,10 @@
 //#include "ax.h"
 #include "config/CemuConfig.h"
 
+#ifdef BOTTOM_SCREEN_ENABLED
+#include "Cafe/HW/Latte/Core/BottomScreenBridge.h"
+#endif
+
 namespace snd_core
 {
 	uint32 numProcessedFrames = 0;
@@ -180,6 +184,26 @@ namespace snd_core
 			outputChannel[i] = _swapEndianS16(sampleData[i]);
 		}
 
+#ifdef BOTTOM_SCREEN_ENABLED
+		// This block on its own, not the group of four below.
+		//
+		// The group is laid out with a stride taken from the output
+		// device, and `channels` above falls back to AX_TV_CHANNEL_COUNT
+		// -- six -- when no device is configured. A stereo title then
+		// writes two channels into slots spaced six apart, so the group
+		// buffer is real audio separated by samples nobody wrote, and
+		// reading it whole gave a sound the tester described as a
+		// scrambled TV channel. Here the block is contiguous and its
+		// channel count is its own rather than the device's.
+		//
+		// It also reaches the stream every 3ms instead of every 12ms,
+		// which is a quarter of one buffering stage off the latency.
+		if (sampleCount >= AX_SAMPLES_PER_3MS_48KHZ)
+			BottomScreen::SubmitAudio(outputChannel, AX_SAMPLES_PER_3MS_48KHZ,
+			                          sampleCount / AX_SAMPLES_PER_3MS_48KHZ,
+			                          false);
+#endif
+
 		tempAudioBlockCounter++;
 		if (tempAudioBlockCounter == AX_FRAMES_PER_GROUP)
 		{
@@ -316,6 +340,17 @@ namespace snd_core
 			outputChannel[i] = _swapEndianS16(sampleData[i]);
 		}
 
+#ifdef BOTTOM_SCREEN_ENABLED
+		// The GamePad's own speakers, taken the same way as the
+		// television's above and for the same reasons. A game uses both,
+		// and the pad is the screen being streamed, so leaving it out
+		// loses exactly the sound that belongs to the picture.
+		if (sampleCount >= AX_SAMPLES_PER_3MS_48KHZ)
+			BottomScreen::SubmitAudio(outputChannel, AX_SAMPLES_PER_3MS_48KHZ,
+			                          sampleCount / AX_SAMPLES_PER_3MS_48KHZ,
+			                          true);
+#endif
+
 		tempDRCAudioBlockCounter++;
 		if (tempDRCAudioBlockCounter == AX_FRAMES_PER_GROUP)
 		{
@@ -393,6 +428,9 @@ namespace snd_core
 	/* AX output */
 
 	uint32 numQueuedFramesSndGeneric = 0;
+	static bool systemAppletMuted = false;
+	static sint32 systemAppletTvVolume = 0;
+	static sint32 systemAppletPadVolume = 0;
 
 	void AXOut_init()
 	{
@@ -471,6 +509,37 @@ namespace snd_core
 				g_portalAudio->Play();
 			else
 				g_portalAudio->Stop();
+		}
+	}
+
+	void AXOut_setSystemAppletMuted(bool muted)
+	{
+		std::unique_lock lock(g_audioMutex);
+		if (systemAppletMuted == muted)
+			return;
+
+		systemAppletMuted = muted;
+		if (muted)
+		{
+			systemAppletTvVolume = GetConfig().tv_volume;
+			systemAppletPadVolume = GetConfig().pad_volume;
+			if (g_tvAudio)
+			{
+				systemAppletTvVolume = g_tvAudio->GetVolume();
+				g_tvAudio->SetVolume(0);
+			}
+			if (g_padAudio)
+			{
+				systemAppletPadVolume = g_padAudio->GetVolume();
+				g_padAudio->SetVolume(0);
+			}
+		}
+		else
+		{
+			if (g_tvAudio)
+				g_tvAudio->SetVolume(systemAppletTvVolume);
+			if (g_padAudio)
+				g_padAudio->SetVolume(systemAppletPadVolume);
 		}
 	}
 

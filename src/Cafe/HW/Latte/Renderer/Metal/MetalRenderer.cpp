@@ -630,6 +630,23 @@ ImTextureID MetalRenderer::GenerateTexture(const std::vector<uint8>& data, const
 	}
 }
 
+bool MetalRenderer::UpdateTexture(ImTextureID id, const std::vector<uint8>& data, const Vector2i& size)
+{
+	if (!id || size.x <= 0 || size.y <= 0 || data.size() < (size_t)size.x * size.y * 3)
+		return false;
+	std::vector<uint8> rgba((size_t)size.x * size.y * 4);
+	for (size_t pixel = 0; pixel < (size_t)size.x * size.y; ++pixel)
+	{
+		rgba[pixel * 4 + 0] = data[pixel * 3 + 0];
+		rgba[pixel * 4 + 1] = data[pixel * 3 + 1];
+		rgba[pixel * 4 + 2] = data[pixel * 3 + 2];
+		rgba[pixel * 4 + 3] = 0xFF;
+	}
+	((MTL::Texture*)id)->replaceRegion(MTL::Region(0, 0, size.x, size.y), 0, 0,
+		rgba.data(), size.x * 4, 0);
+	return true;
+}
+
 void MetalRenderer::DeleteTexture(ImTextureID id)
 {
     EnsureImGuiBackend();

@@ -1,4 +1,8 @@
 #include "input/emulated/VPADController.h"
+
+#ifdef BOTTOM_SCREEN_ENABLED
+#include "Cafe/HW/Latte/Core/BottomScreenBridge.h"
+#endif
 #include "input/api/Controller.h"
 #ifdef HAS_SDL
 #include "input/api/SDL/SDLController.h"
@@ -6,6 +10,7 @@
 #include "WindowSystem.h"
 #include "input/InputManager.h"
 #include "Cafe/HW/Latte/Core/Latte.h"
+#include "Cafe/HW/Latte/Core/SystemAppletBridge.h"
 #include "Cafe/CafeSystem.h"
 
 enum ControllerVPADMapping2 : uint32
@@ -57,7 +62,13 @@ void VPADController::VPADRead(VPADStatus_t& status, const BtnRepeat& repeat)
 		if (is_axis_mapping(i))
 			continue;
 
+#ifdef BOTTOM_SCREEN_ENABLED
+		// Merged, not replaced: a pad or keyboard on the host keeps working
+		// while someone else plays from a phone.
+		if (is_mapping_down(i) || BottomScreen::IsButtonHeld(i))
+#else
 		if (is_mapping_down(i))
+#endif
 		{
 			const uint32 value = get_emulated_button_flag(i);
 			if (value == 0)
@@ -76,8 +87,17 @@ void VPADController::VPADRead(VPADStatus_t& status, const BtnRepeat& repeat)
 	}
 
 	m_homebutton_down |= is_home_down();
+#ifdef BOTTOM_SCREEN_ENABLED
+	m_homebutton_down |= BottomScreen::IsButtonHeld(kButtonId_Home);
+#endif
 
-	const auto axis = get_axis();
+	auto axis = get_axis();
+#ifdef BOTTOM_SCREEN_ENABLED
+	{
+		float nx, ny;
+		if (BottomScreen::GetStick(0, nx, ny)) { axis.x = nx; axis.y = ny; }
+	}
+#endif
 	status.leftStick.x = axis.x;
 	status.leftStick.y = axis.y;
 
@@ -95,7 +115,13 @@ void VPADController::VPADRead(VPADStatus_t& status, const BtnRepeat& repeat)
 	else if (axis.y >= kAxisThreshold || (HAS_FLAG(last_hold, VPAD_STICK_L_UP) && axis.y >= kHoldAxisThreshold))
 		status.hold |= VPAD_STICK_L_UP;
 
-	const auto rotation = get_rotation();
+	auto rotation = get_rotation();
+#ifdef BOTTOM_SCREEN_ENABLED
+	{
+		float nx, ny;
+		if (BottomScreen::GetStick(1, nx, ny)) { rotation.x = nx; rotation.y = ny; }
+	}
+#endif
 	status.rightStick.x = rotation.x;
 	status.rightStick.y = rotation.y;
 
@@ -194,7 +220,17 @@ void VPADController::update_touch(VPADStatus_t& status)
 
 	auto& instance = InputManager::instance();
 	bool pad_view;
-	if (has_position())
+	float applet_touch_x = 0.0f;
+	float applet_touch_y = 0.0f;
+	if (SystemAppletBridge::GetPadTouch(applet_touch_x, applet_touch_y))
+	{
+		status.tpData.touch = kTpTouchOn;
+		status.tpData.validity = kTpValid;
+		status.tpData.x = (uint16)(applet_touch_x * 3883.0f + 92.0f);
+		status.tpData.y = (uint16)(4095.0f - applet_touch_y * 3694.0f - 254.0f);
+		m_last_touch_position = glm::ivec2{ status.tpData.x, status.tpData.y };
+	}
+	else if (has_position())
 	{
 		const auto mouse = get_position();
 

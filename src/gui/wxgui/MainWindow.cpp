@@ -60,11 +60,21 @@
 //Cafe libs
 #include "Cafe/OS/libs/nfc/nfc.h"
 #include "Cafe/OS/libs/swkbd/swkbd.h"
+#include "Cafe/OS/libs/sysapp/sysapp.h"
+#include "Cafe/OS/libs/snd_core/ax.h"
+#include "Cafe/HW/Latte/Core/BottomScreenBridge.h"
+#include "Cafe/HW/Latte/Core/SystemAppletBridge.h"
 
 #include "Cafe/HW/Latte/Renderer/Renderer.h" // For renderer API checks
 
 extern WindowSystem::WindowInfo g_window_info;
 extern std::shared_mutex g_mutex;
+
+namespace coreinit
+{
+	void StartBackgroundTransition();
+	void StartForegroundTransition();
+}
 
 enum
 {
@@ -156,6 +166,7 @@ enum
 	MAINFRAME_MENU_ID_HELP_UPDATE,
 	// custom
 	MAINFRAME_ID_TIMER1 = 21800,
+	MAINFRAME_ID_HOME_MENU_PROCESS,
 };
 
 wxDEFINE_EVENT(wxEVT_SET_WINDOW_TITLE, wxCommandEvent);
@@ -163,6 +174,7 @@ wxDEFINE_EVENT(wxEVT_REQUEST_GAMELIST_REFRESH, wxCommandEvent);
 wxDEFINE_EVENT(wxEVT_LAUNCH_GAME, wxLaunchGameEvent);
 wxDEFINE_EVENT(wxEVT_REQUEST_RECREATE_CANVAS, wxCommandEvent);
 wxDEFINE_EVENT(wxEVT_REQUEST_GAME_EXIT, wxCommandEvent);
+wxDEFINE_EVENT(wxEVT_REQUEST_HOME_MENU, wxCommandEvent);
 
 wxBEGIN_EVENT_TABLE(MainWindow, wxFrame)
 EVT_TIMER(MAINFRAME_ID_TIMER1, MainWindow::OnTimer)
@@ -245,6 +257,8 @@ EVT_COMMAND(wxID_ANY, wxEVT_SET_WINDOW_TITLE, MainWindow::OnSetWindowTitle)
 
 EVT_COMMAND(wxID_ANY, wxEVT_REQUEST_RECREATE_CANVAS, MainWindow::OnRequestRecreateCanvas)
 EVT_COMMAND(wxID_ANY, wxEVT_REQUEST_GAME_EXIT, MainWindow::OnRequestGameExit)
+EVT_COMMAND(wxID_ANY, wxEVT_REQUEST_HOME_MENU, MainWindow::OnRequestHomeMenu)
+EVT_END_PROCESS(MAINFRAME_ID_HOME_MENU_PROCESS, MainWindow::OnHomeMenuProcessEnded)
 
 wxEND_EVENT_TABLE()
 
@@ -294,8 +308,15 @@ private:
 	MainWindow* m_window;
 };
 
+static long GetMainWindowStyle()
+{
+	if (LaunchSettings::IsSystemOverlayChild())
+		return wxBORDER_NONE | wxCLIP_CHILDREN | wxFRAME_NO_TASKBAR;
+	return wxMINIMIZE_BOX | wxMAXIMIZE_BOX | wxSYSTEM_MENU | wxCAPTION | wxCLOSE_BOX | wxCLIP_CHILDREN | wxRESIZE_BORDER;
+}
+
 MainWindow::MainWindow()
-	: wxFrame(nullptr, wxID_ANY, GetInitialWindowTitle(), wxDefaultPosition, wxSize(1280, 720), wxMINIMIZE_BOX | wxMAXIMIZE_BOX | wxSYSTEM_MENU | wxCAPTION | wxCLOSE_BOX | wxCLIP_CHILDREN | wxRESIZE_BORDER)
+	: wxFrame(nullptr, wxID_ANY, GetInitialWindowTitle(), wxDefaultPosition, wxSize(1280, 720), GetMainWindowStyle())
 {
 #ifdef __WXMAC__
 	// Not necessary to set wxApp::s_macExitMenuItemId as automatically handled
@@ -437,6 +458,15 @@ wxString MainWindow::GetInitialWindowTitle()
 
 void MainWindow::OnClose(wxCloseEvent& event)
 {
+	if (m_home_menu_process)
+	{
+		wxProcess::Kill(m_home_menu_pid, wxSIGTERM, wxKILL_CHILDREN);
+		m_home_menu_process->Detach();
+		delete m_home_menu_process;
+		m_home_menu_process = nullptr;
+		m_home_menu_pid = 0;
+	}
+
 	if (m_debugger_window)
 	{
 		m_debugger_window->CleanupForDestroy();
@@ -618,6 +648,8 @@ bool MainWindow::FileLoad(const fs::path launchPath, wxLaunchGameEvent::INITIATE
 	CreateCanvas();
 	CafeSystem::LaunchForegroundTitle();
 	RecreateMenu();
+	if (LaunchSettings::IsSystemOverlayChild())
+		ConfigureSystemAppletWindow();
 	UpdateChildWindowTitleRunningState();
 
 	return true;
@@ -1339,6 +1371,9 @@ void MainWindow::LoadSettings()
 
 void MainWindow::SaveSettings()
 {
+	if (LaunchSettings::IsSystemOverlayChild())
+		return;
+
 	auto lock = GetConfigHandle().Lock();
 	auto& config = GetWxGUIConfig();
 
@@ -2417,8 +2452,12 @@ void MainWindow::RecreateMenu()
 		UpdateNFCMenu();
 	}
 
-	// hide new menu in fullscreen
-	if (IsFullScreen())
+	// A system overlay contributes only its render surface to the caller's
+	// window. Account refreshes can rebuild this menu after launch, so keep
+	// it detached every time rather than only during initial presentation.
+	if (LaunchSettings::IsSystemOverlayChild())
+		SetMenuVisible(false);
+	else if (IsFullScreen())
 		SetMenuVisible(false);
 }
 
@@ -2504,6 +2543,157 @@ void MainWindow::OnRequestGameExit(wxCommandEvent& event)
 	{
 		EndEmulation();
 	}
+}
+
+void MainWindow::RequestHomeMenu()
+{
+	wxQueueEvent(this, new wxCommandEvent(wxEVT_REQUEST_HOME_MENU));
+}
+
+void MainWindow::OnRequestHomeMenu(wxCommandEvent& event)
+{
+	if (LaunchSettings::IsSystemOverlayChild())
+	{
+		Close();
+		return;
+	}
+
+	if (!m_game_launched || m_home_menu_process)
+		return;
+
+	const uint64 caller_title_id = CafeSystem::GetForegroundTitleId();
+	const bool japanese = CafeSystem::GetPlatformRegion() == CafeConsoleRegion::JPN;
+	const std::array<uint64, 2> candidates = japanese
+		? std::array<uint64, 2>{0x0005003010010209ULL, 0x000500301001020AULL}
+		: std::array<uint64, 2>{0x000500301001020AULL, 0x0005003010010209ULL};
+
+	uint64 home_menu_title_id = 0;
+	TitleInfo home_menu_info;
+	for (const uint64 title_id : candidates)
+	{
+		if (CafeTitleList::GetFirstByTitleId(title_id, home_menu_info))
+		{
+			home_menu_title_id = title_id;
+			break;
+		}
+	}
+
+	if (home_menu_title_id == 0)
+		return;
+
+	auto quote = [](wxString value) {
+		value.Replace("\\", "\\\\");
+		value.Replace("\"", "\\\"");
+		return "\"" + value + "\"";
+	};
+	const std::string applet_channel = fmt::format("cemu_hbm_{}_{}", wxGetProcessId(),
+		std::chrono::steady_clock::now().time_since_epoch().count());
+	if (!SystemAppletBridge::StartConsumer(applet_channel))
+	{
+		wxMessageBox(_("Cemu could not create the Wii U system applet compositor."),
+			_("HOME Menu"), wxOK | wxCENTRE | wxICON_ERROR, this);
+		return;
+	}
+
+	wxString command = quote(wxHelper::FromPath(ActiveSettings::GetExecutablePath()));
+	command += wxString::FromUTF8(fmt::format(" --title-id {:016x}", home_menu_title_id));
+	command += " --mlc " + quote(wxHelper::FromPath(ActiveSettings::GetMlcPath()));
+	command += wxString::FromUTF8(fmt::format(" --account {:08x}", ActiveSettings::GetPersistentId()));
+	command += wxString::FromUTF8(fmt::format(" --system-overlay-child=true --system-overlay-caller-title-id {:016x}", caller_title_id));
+	command += " --system-applet-channel " + quote(wxString::FromUTF8(applet_channel));
+
+	BottomScreen::SetSuspended(true);
+	snd_core::AXOut_setSystemAppletMuted(true);
+	coreinit::StartBackgroundTransition();
+
+	m_home_menu_process = new wxProcess(this, MAINFRAME_ID_HOME_MENU_PROCESS);
+	m_home_menu_pid = wxExecute(command, wxEXEC_ASYNC, m_home_menu_process);
+	if (m_home_menu_pid == 0)
+	{
+		delete m_home_menu_process;
+		m_home_menu_process = nullptr;
+		SystemAppletBridge::StopConsumer();
+		BottomScreen::SetSuspended(false);
+		snd_core::AXOut_setSystemAppletMuted(false);
+		coreinit::StartForegroundTransition();
+		wxMessageBox(_("Cemu could not start the Wii U HOME Button Menu title."),
+			_("HOME Menu"), wxOK | wxCENTRE | wxICON_ERROR, this);
+		return;
+	}
+
+	m_home_menu_pad_was_shown = m_padView && m_padView->IsShown();
+}
+
+void MainWindow::OnHomeMenuProcessEnded(wxProcessEvent& event)
+{
+	if (!m_home_menu_process || event.GetPid() != m_home_menu_pid)
+		return;
+
+	delete m_home_menu_process;
+	m_home_menu_process = nullptr;
+	m_home_menu_pid = 0;
+
+	SystemAppletBridge::StopConsumer();
+	BottomScreen::SetSuspended(false);
+	if (m_home_menu_pad_was_shown && m_padView && !m_padView->IsShown())
+		m_padView->Show();
+	if (event.GetExitCode() == LaunchSettings::SYSTEM_OVERLAY_EXIT_LAUNCH_WII_U_MENU)
+	{
+		m_home_menu_pad_was_shown = false;
+		const bool launched = LaunchWiiUMenu();
+		snd_core::AXOut_setSystemAppletMuted(false);
+		if (!launched)
+			coreinit::StartForegroundTransition();
+		return;
+	}
+
+	snd_core::AXOut_setSystemAppletMuted(false);
+	coreinit::StartForegroundTransition();
+	if (m_home_menu_pad_was_shown && m_padView)
+		m_padView->Show();
+	m_home_menu_pad_was_shown = false;
+	Raise();
+}
+
+void MainWindow::ConfigureSystemAppletWindow()
+{
+	SetMenuVisible(false);
+	SetClientSize(1, 1);
+	SetPosition({ -32000, -32000 });
+	Layout();
+	if (m_padView)
+	{
+		// Keep a drawable alive for the emulated GamePad output and remote
+		// input path, but do not expose the helper process as a second window.
+		// PadViewFrame normally enforces 320x180; remove that minimum before
+		// shrinking it so a window manager cannot leave a visible sliver.
+		m_padView->Restore();
+		m_padView->SetMinClientSize({ 1, 1 });
+		m_padView->SetClientSize(1, 1);
+		m_padView->SetPosition({ -32000, -32000 });
+	}
+	if (!LaunchSettings::GetSystemAppletChannel() ||
+		!SystemAppletBridge::StartPublisher(*LaunchSettings::GetSystemAppletChannel()))
+	{
+		wxMessageBox(_("Cemu could not connect to the Wii U system applet compositor."),
+			_("HOME Menu"), wxOK | wxCENTRE | wxICON_ERROR, this);
+		Close();
+	}
+}
+
+bool MainWindow::LaunchWiiUMenu()
+{
+	TitleInfo menu_info;
+	const uint64 menu_title_id = _SYSGetSystemApplicationTitleId(0);
+	if (!CafeTitleList::GetFirstByTitleId(menu_title_id, menu_info))
+	{
+		wxMessageBox(_("The Wii U Menu title is not installed in the configured MLC."),
+			_("Wii U Menu"), wxOK | wxCENTRE | wxICON_ERROR, this);
+		return false;
+	}
+
+	EndEmulation();
+	return FileLoad(menu_info.GetPath(), wxLaunchGameEvent::INITIATED_BY::MENU);
 }
 
 bool MainWindow::FullscreenEnabled() const

@@ -6,6 +6,7 @@
 
 #include "config/ActiveSettings.h"
 #include "Cafe/OS/libs/swkbd/swkbd.h"
+#include "Cafe/HW/Latte/Core/SystemAppletBridge.h"
 #ifdef ENABLE_OPENGL
 #include "wxgui/canvas/OpenGLCanvas.h"
 #endif
@@ -16,6 +17,7 @@
 #include "wxgui/canvas/MetalCanvas.h"
 #endif
 #include "config/CemuConfig.h"
+#include "config/LaunchSettings.h"
 #include "wxgui/MainWindow.h"
 #include "wxgui/helpers/wxHelpers.h"
 #include "input/InputManager.h"
@@ -31,7 +33,10 @@ extern WindowSystem::WindowInfo g_window_info;
 #define PAD_MIN_HEIGHT 180
 
 PadViewFrame::PadViewFrame(wxFrame* parent)
-	: wxFrame(nullptr, wxID_ANY, _("GamePad View"), wxDefaultPosition, wxDefaultSize, wxMINIMIZE_BOX | wxMAXIMIZE_BOX | wxSYSTEM_MENU | wxCAPTION | wxCLIP_CHILDREN | wxRESIZE_BORDER | wxCLOSE_BOX | wxWANTS_CHARS)
+	: wxFrame(nullptr, wxID_ANY, _("GamePad View"), wxDefaultPosition, wxDefaultSize,
+		LaunchSettings::IsSystemOverlayChild()
+			? (wxBORDER_NONE | wxCLIP_CHILDREN | wxFRAME_NO_TASKBAR | wxWANTS_CHARS)
+			: (wxMINIMIZE_BOX | wxMAXIMIZE_BOX | wxSYSTEM_MENU | wxCAPTION | wxCLIP_CHILDREN | wxRESIZE_BORDER | wxCLOSE_BOX | wxWANTS_CHARS))
 {
 	g_window_info.window_pad = initHandleContextFromWxWidgetsWindow(this);
 
@@ -175,13 +180,17 @@ void PadViewFrame::OnKeyUp(wxKeyEvent& event)
 
 void PadViewFrame::OnGesturePan(wxPanGestureEvent& event)
 {
+	auto physPos = ToPhys(event.GetPosition());
+	const bool pressed = event.IsGestureStart() || !event.IsGestureEnd();
+	if (SystemAppletBridge::SubmitPadTouch(physPos.x, physPos.y, pressed))
+		return;
+
 	auto& instance = InputManager::instance();
 
 	std::scoped_lock lock(instance.m_pad_touch.m_mutex);
-	auto physPos = ToPhys(event.GetPosition());
 	instance.m_pad_touch.position = { physPos.x, physPos.y };
-	instance.m_pad_touch.left_down = event.IsGestureStart() || !event.IsGestureEnd();
-	if (event.IsGestureStart() || !event.IsGestureEnd())
+	instance.m_pad_touch.left_down = pressed;
+	if (pressed)
 		instance.m_pad_touch.left_down_toggle = true;
 }
 
@@ -195,10 +204,13 @@ void PadViewFrame::OnChar(wxKeyEvent& event)
 
 void PadViewFrame::OnMouseMove(wxMouseEvent& event)
 {
+	auto physPos = ToPhys(event.GetPosition());
+	if (SystemAppletBridge::SubmitPadTouch(physPos.x, physPos.y, event.LeftIsDown()))
+		return;
+
 	auto& instance = InputManager::instance();
 
 	std::scoped_lock lock(instance.m_pad_touch.m_mutex);
-	auto physPos = ToPhys(event.GetPosition());
 	instance.m_pad_mouse.position = { physPos.x, physPos.y };
 
 	event.Skip();
@@ -206,11 +218,15 @@ void PadViewFrame::OnMouseMove(wxMouseEvent& event)
 
 void PadViewFrame::OnMouseLeft(wxMouseEvent& event)
 {
+	auto physPos = ToPhys(event.GetPosition());
+	if (SystemAppletBridge::SubmitPadTouch(physPos.x, physPos.y,
+		event.ButtonDown(wxMOUSE_BTN_LEFT)))
+		return;
+
 	auto& instance = InputManager::instance();
 
 	std::scoped_lock lock(instance.m_pad_mouse.m_mutex);
 	instance.m_pad_mouse.left_down = event.ButtonDown(wxMOUSE_BTN_LEFT);
-	auto physPos = ToPhys(event.GetPosition());
 	instance.m_pad_mouse.position = { physPos.x, physPos.y };
 	if (event.ButtonDown(wxMOUSE_BTN_LEFT))
 		instance.m_pad_mouse.left_down_toggle = true;

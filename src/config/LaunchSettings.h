@@ -38,6 +38,12 @@ public:
 	static bool ForceMultiCoreInterpreter() { return s_force_multicore_interpreter; }
 
 	static std::optional<uint32> GetPersistentId() { return s_persistent_id; }
+	static bool IsSystemOverlayChild() { return s_system_overlay_child; }
+	static std::optional<uint64> GetSystemOverlayCallerTitleId() { return s_system_overlay_caller_title_id; }
+	static const std::optional<std::string>& GetSystemAppletChannel() { return s_system_applet_channel; }
+
+	// Kept in the process exit-code range so it survives wxExecute on POSIX.
+	static constexpr int SYSTEM_OVERLAY_EXIT_LAUNCH_WII_U_MENU = 0x55;
 
 	static uint32 GetPPCRecLowerAddr() { return ppcRec_limitLowerAddr; };
 	static uint32 GetPPCRecUpperAddr() { return ppcRec_limitUpperAddr; };
@@ -64,6 +70,9 @@ private:
 	inline static bool s_force_multicore_interpreter = false;
 	
 	inline static std::optional<uint32> s_persistent_id{};
+	inline static bool s_system_overlay_child = false;
+	inline static std::optional<uint64> s_system_overlay_caller_title_id{};
+	inline static std::optional<std::string> s_system_applet_channel{};
 
 	// for recompiler debugging
 	inline static uint32 ppcRec_limitLowerAddr{};

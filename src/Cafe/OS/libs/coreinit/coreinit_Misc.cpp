@@ -793,16 +793,43 @@ namespace coreinit
 
 	void OSReleaseForeground()
 	{
+		if (LaunchSettings::IsSystemOverlayChild())
+		{
+			// A system applet asks Cafe OS to complete its hand-off before it can
+			// become the active foreground process. The parent Cemu process has
+			// already released the foreground, so acknowledge that hand-off here.
+			StartForegroundTransition();
+			return;
+		}
 		cemuLog_logDebug(LogType::Force, "OSReleaseForeground not implemented");
 	}
 
-	bool s_transitionToBackground = false;
-	bool s_transitionToForeground = false;
+	uint32 OSGetCallArgs(uint32be* argsOut, void*, void*)
+	{
+		// Home Button Menu expects the main application process as its caller.
+		// Keep the menu process as the default for any other system applet.
+		argsOut[0] = LaunchSettings::IsSystemOverlayChild() ? 15 : 2;
+		argsOut[1] = 0;
+		return 0;
+	}
+
+	std::atomic_bool s_transitionToBackground = false;
+	std::atomic_bool s_transitionToForeground = false;
+
+	void StartBackgroundTransition()
+	{
+		s_transitionToBackground = true;
+	}
+
+	void StartForegroundTransition()
+	{
+		s_transitionToForeground = true;
+	}
 
 	void StartBackgroundForegroundTransition()
 	{
-		s_transitionToBackground = true;
-		s_transitionToForeground = true;
+		StartBackgroundTransition();
+		StartForegroundTransition();
 	}
 
 	// called at the beginning of OSReceiveMessage if the queue is the system message queue
@@ -909,6 +936,7 @@ namespace coreinit
 		cafeExportRegister("coreinit", OSRestartGame, LogType::Placeholder);
 
 		cafeExportRegister("coreinit", OSReleaseForeground, LogType::Placeholder);
+		cafeExportRegister("coreinit", OSGetCallArgs, LogType::Placeholder);
 
 		cafeExportRegister("coreinit", OSDriver_Register, LogType::Placeholder);
 		cafeExportRegister("coreinit", OSDriver_Deregister, LogType::Placeholder);

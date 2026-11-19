@@ -10,6 +10,7 @@
 #include <fstream>
 
 #include "config/ActiveSettings.h"
+#include "config/LaunchSettings.h"
 #include "Cafe/IOSU/legacy/iosu_acp.h"
 #include "Cafe/IOSU/legacy/iosu_ioctl.h"
 
@@ -240,11 +241,25 @@ namespace acp
 		// for applets we return the menu titleId
 		if (((currentTitleId >> 32) & 0xFF) == 0x30)
 		{
-			// get menu titleId
-			uint64 menuTitleId = _SYSGetSystemApplicationTitleId(0);
-			*titleId = menuTitleId;
+			if (const auto caller = LaunchSettings::GetSystemOverlayCallerTitleId())
+				*titleId = *caller;
+			else
+				*titleId = _SYSGetSystemApplicationTitleId(0);
 		}
 
+		osLib_returnFromFunction(hCPU, 0);
+	}
+
+	void export_ACPGetTitleInfoOfMainApplication(PPCInterpreter_t* hCPU)
+	{
+		ppcDefineParamTypePtr(titleId, uint64be, 0);
+		ppcDefineParamU32BEPtr(deviceType, 1);
+		ppcDefineParamU32BEPtr(applicationType, 2);
+
+		const uint64 callerTitleId = LaunchSettings::GetSystemOverlayCallerTitleId().value_or(CafeSystem::GetForegroundTitleId());
+		*titleId = callerTitleId;
+		*deviceType = 3; // MLC
+		*applicationType = 0;
 		osLib_returnFromFunction(hCPU, 0);
 	}
 
@@ -358,6 +373,7 @@ namespace acp
 			osLib_addFunction("nn_acp", "ACPGetLaunchMetaData", export_ACPGetLaunchMetaData);
 			osLib_addFunction("nn_acp", "ACPGetLaunchMetaXml", export_ACPGetLaunchMetaXml);
 			osLib_addFunction("nn_acp", "ACPGetTitleIdOfMainApplication", export_ACPGetTitleIdOfMainApplication);
+			osLib_addFunction("nn_acp", "ACPGetTitleInfoOfMainApplication", export_ACPGetTitleInfoOfMainApplication);
 
 			osLib_addFunction("nn_acp", "ACPGetTitleMetaDirByDevice", export_ACPGetTitleMetaDirByDevice);
 			osLib_addFunction("nn_acp", "ACPGetTitleMetaXmlByDevice", export_ACPGetTitleMetaXmlByDevice);

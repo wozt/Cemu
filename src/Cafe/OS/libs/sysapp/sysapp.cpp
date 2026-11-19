@@ -3,6 +3,8 @@
 #include "Cafe/CafeSystem.h"
 #include "Cafe/OS/libs/coreinit/coreinit_FG.h"
 #include "Cafe/OS/libs/coreinit/coreinit_Misc.h"
+#include "config/LaunchSettings.h"
+#include "WindowSystem.h"
 
 typedef struct  
 {
@@ -455,7 +457,43 @@ void sysappExport__SYSReturnToCallerWithStandardResult(PPCInterpreter_t* hCPU)
 {
 	ppcDefineParamU32BEPtr(resultPtr, 0);
 	cemuLog_log(LogType::Force, "_SYSReturnToCallerWithStandardResult(0x{:08x}) result: 0x{:08x}", hCPU->gpr[3], (uint32)*resultPtr);
+	if (LaunchSettings::IsSystemOverlayChild())
+	{
+		const sint32 result = static_cast<sint32>((uint32)*resultPtr);
+		std::thread shutdown_thread([result]() {
+			CafeSystem::ShutdownTitle();
+			CafeSystem::NotifyPPCProcessExit(result);
+		});
+		shutdown_thread.detach();
+		coreinit::OSSuspendThread(coreinit::OSGetCurrentThread());
+		return;
+	}
 	while (true) std::this_thread::sleep_for(std::chrono::milliseconds(10));
+}
+
+void sysappExport__SYSSwitchToOverlayFromHBM(PPCInterpreter_t* hCPU)
+{
+	if (LaunchSettings::IsSystemOverlayChild())
+	{
+		WindowSystem::RequestHomeMenu();
+		coreinit::OSSuspendThread(coreinit::OSGetCurrentThread());
+	}
+	osLib_returnFromFunction(hCPU, 0);
+}
+
+void sysappExport__SYSLaunchMenuFromHBM(PPCInterpreter_t* hCPU)
+{
+	if (LaunchSettings::IsSystemOverlayChild())
+	{
+		std::thread shutdown_thread([]() {
+			CafeSystem::ShutdownTitle();
+			CafeSystem::NotifyPPCProcessExit(LaunchSettings::SYSTEM_OVERLAY_EXIT_LAUNCH_WII_U_MENU);
+		});
+		shutdown_thread.detach();
+		coreinit::OSSuspendThread(coreinit::OSGetCurrentThread());
+		return;
+	}
+	osLib_returnFromFunction(hCPU, 0);
 }
 
 void sysappExport__SYSGetEShopArgs(PPCInterpreter_t* hCPU)
@@ -566,6 +604,30 @@ struct SysLauncherArgs28
 
 static_assert(sizeof(SysLauncherArgs28) == 0x28);
 
+struct SysHBMArgs
+{
+	uint32be callerTitleIdHigh;
+	uint32be callerTitleIdLow;
+	uint32be mode;
+	uint32be callerUpid;
+	uint32be ukn10;
+	uint32be ukn14;
+	uint32be ukn18;
+};
+
+static_assert(sizeof(SysHBMArgs) == 0x1C);
+
+uint32 _SYSGetHBMArgs(SysHBMArgs* argsOut)
+{
+	memset(argsOut, 0, sizeof(*argsOut));
+	const uint64 callerTitleId = LaunchSettings::GetSystemOverlayCallerTitleId().value_or(0);
+	argsOut->callerTitleIdHigh = callerTitleId >> 32;
+	argsOut->callerTitleIdLow = callerTitleId;
+	argsOut->mode = 0;
+	argsOut->callerUpid = 15;
+	return 0;
+}
+
 uint32 _SYSGetLauncherArgs(void* argsOut)
 {
 	uint32 sdkVersion = coreinit::__OSGetProcessSDKVersion();
@@ -580,6 +642,11 @@ uint32 _SYSGetLauncherArgs(void* argsOut)
 		// new format
 		SysLauncherArgs28* launcherArgs28 = (SysLauncherArgs28*)argsOut;
 		memset(launcherArgs28, 0, sizeof(SysLauncherArgs28));
+		if (const auto caller = LaunchSettings::GetSystemOverlayCallerTitleId())
+		{
+			launcherArgs28->caller_id = *caller;
+			launcherArgs28->launch_title = CafeSystem::GetForegroundTitleId();
+		}
 	}
 	return 0; // return argument is todo
 }
@@ -697,6 +764,11 @@ namespace sysapp
 			osLib_addFunction("sysapp", "SYSGetStandardResult", sysappExport_SYSGetStandardResult);
 
 			cafeExportRegisterFunc(_SYSGetLauncherArgs, "sysapp", "_SYSGetLauncherArgs", LogType::Placeholder);
+			cafeExportRegisterFunc(_SYSGetHBMArgs, "sysapp", "_SYSGetHBMArgs", LogType::Placeholder);
+			osLib_addFunction("sysapp", "_SYSSwitchToOverlayFromHBM", sysappExport__SYSSwitchToOverlayFromHBM);
+			osLib_addFunction("sysapp", "_SYSLaunchMenuFromHBM", sysappExport__SYSLaunchMenuFromHBM);
+			osLib_addFunction("sysapp", "_SYSLaunchMenuWithCheckingAccountFromHBM", sysappExport__SYSLaunchMenuFromHBM);
+			osLib_addFunction("sysapp", "_SYSLaunchMenuWithPackFromHBM", sysappExport__SYSLaunchMenuFromHBM);
 			cafeExportRegisterFunc(_SYSGetAccountArgs, "sysapp", "_SYSGetAccountArgs", LogType::Placeholder);
 
 			sysapp::load();

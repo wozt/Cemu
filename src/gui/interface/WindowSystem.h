@@ -117,6 +117,7 @@ namespace WindowSystem
 
 	void NotifyGameLoaded();
 	void NotifyGameExited();
+	void RequestHomeMenu();
 
 	void RefreshGameList();
 

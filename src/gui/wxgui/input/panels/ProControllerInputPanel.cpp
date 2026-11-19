@@ -9,7 +9,7 @@
 #include "wxgui/helpers/wxHelpers.h"
 #include "wxgui/components/wxInputDraw.h"
 
-const ProController::ButtonId g_kFirstColumnItems[] = { ProController::kButtonId_A, ProController::kButtonId_B, ProController::kButtonId_X, ProController::kButtonId_Y, ProController::kButtonId_L, ProController::kButtonId_R, ProController::kButtonId_ZL, ProController::kButtonId_ZR, ProController::kButtonId_Plus, ProController::kButtonId_Minus };
+const ProController::ButtonId g_kFirstColumnItems[] = { ProController::kButtonId_A, ProController::kButtonId_B, ProController::kButtonId_X, ProController::kButtonId_Y, ProController::kButtonId_L, ProController::kButtonId_R, ProController::kButtonId_ZL, ProController::kButtonId_ZR, ProController::kButtonId_Plus, ProController::kButtonId_Minus, ProController::kButtonId_Home };
 const ProController::ButtonId g_kSecondColumnItems[] = { ProController::kButtonId_StickL, ProController::kButtonId_StickL_Up, ProController::kButtonId_StickL_Down, ProController::kButtonId_StickL_Left, ProController::kButtonId_StickL_Right };
 const ProController::ButtonId g_kThirdColumnItems[] = { ProController::kButtonId_StickR, ProController::kButtonId_StickR_Up, ProController::kButtonId_StickR_Down, ProController::kButtonId_StickR_Left, ProController::kButtonId_StickR_Right };
 const ProController::ButtonId g_kFourthRowItems[] = { ProController::kButtonId_Up, ProController::kButtonId_Down, ProController::kButtonId_Left, ProController::kButtonId_Right };
@@ -33,7 +33,7 @@ ProControllerInputPanel::ProControllerInputPanel(wxWindow* parent)
 
 	//////////////////////////////////////////////////////////////////
 
-	main_sizer->Add(new wxStaticLine(this, wxID_ANY, wxDefaultPosition, wxDefaultSize, wxVERTICAL), wxGBPosition(0, column + 2), wxGBSpan(11, 1), wxALL | wxEXPAND, 5);
+	main_sizer->Add(new wxStaticLine(this, wxID_ANY, wxDefaultPosition, wxDefaultSize, wxVERTICAL), wxGBPosition(0, column + 2), wxGBSpan(12, 1), wxALL | wxEXPAND, 5);
 
 	row = 0;
 	column += 3;
@@ -54,7 +54,7 @@ ProControllerInputPanel::ProControllerInputPanel(wxWindow* parent)
 	m_left_draw = new wxInputDraw(this, wxID_ANY, wxDefaultPosition, { 60, 60 });
 	main_sizer->Add(m_left_draw, wxGBPosition(row, column + 1), wxGBSpan(2, 1), wxTOP | wxBOTTOM | wxEXPAND | wxALIGN_CENTER, 5);
 
-	main_sizer->Add(new wxStaticLine(this, wxID_ANY, wxDefaultPosition, wxDefaultSize, wxVERTICAL), wxGBPosition(0, column + 3), wxGBSpan(11, 1), wxALL | wxEXPAND, 5);
+	main_sizer->Add(new wxStaticLine(this, wxID_ANY, wxDefaultPosition, wxDefaultSize, wxVERTICAL), wxGBPosition(0, column + 3), wxGBSpan(12, 1), wxALL | wxEXPAND, 5);
 
 	//////////////////////////////////////////////////////////////////
 
@@ -77,7 +77,7 @@ ProControllerInputPanel::ProControllerInputPanel(wxWindow* parent)
 	m_right_draw = new wxInputDraw(this, wxID_ANY, wxDefaultPosition, { 60, 60 });
 	main_sizer->Add(m_right_draw, wxGBPosition(row, column + 1), wxGBSpan(2, 1), wxTOP | wxBOTTOM | wxEXPAND | wxALIGN_CENTER, 5);
 
-	main_sizer->Add(new wxStaticLine(this, wxID_ANY, wxDefaultPosition, wxDefaultSize, wxVERTICAL), wxGBPosition(0, column + 3), wxGBSpan(11, 1), wxALL | wxEXPAND, 5);
+	main_sizer->Add(new wxStaticLine(this, wxID_ANY, wxDefaultPosition, wxDefaultSize, wxVERTICAL), wxGBPosition(0, column + 3), wxGBSpan(12, 1), wxALL | wxEXPAND, 5);
 
 	//////////////////////////////////////////////////////////////////
 

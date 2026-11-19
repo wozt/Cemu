@@ -203,6 +203,8 @@ public:
 	void StopUsingPadAndWait();
 	bool IsPadWindowActive() override;
 
+	bool ReadbackViewRGBA(LatteTextureView* texView, std::vector<uint8>& out,
+	                      sint32& width, sint32& height) override;
 	void HandleScreenshotRequest(LatteTextureView* texView, bool padView) override;
 
 	void QueryMemoryInfo();
@@ -522,6 +524,7 @@ private:
 	bool ImguiBegin(bool mainWindow) override;
 	void ImguiEnd() override;
 	ImTextureID GenerateTexture(const std::vector<uint8>& data, const Vector2i& size) override;
+	bool UpdateTexture(ImTextureID id, const std::vector<uint8>& data, const Vector2i& size) override;
 	void DeleteTexture(ImTextureID id) override;
 	void DeleteFontTextures() override;
 	bool BeginFrame(bool mainWindow) override;

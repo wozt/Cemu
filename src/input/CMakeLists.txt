@@ -108,3 +108,15 @@ target_link_libraries(CemuInput PRIVATE
 if (ENABLE_BLUEZ)
 	target_link_libraries(CemuInput PRIVATE bluez::bluez)
 endif ()
+
+
+# bottom_screen_server: VPADController merges buttons coming from network
+# clients. The define lives on CemuCafe too; without it here the merge
+# would compile away silently and a client's buttons would simply never
+# arrive.
+set(BOTTOM_SCREEN_DIR "${CMAKE_SOURCE_DIR}/../.." CACHE PATH
+    "Path to the bottom_screen_server sources")
+if (EXISTS "${BOTTOM_SCREEN_DIR}/bs_server.c")
+    target_compile_definitions(CemuInput PRIVATE BOTTOM_SCREEN_ENABLED)
+    target_include_directories(CemuInput PRIVATE "${BOTTOM_SCREEN_DIR}")
+endif()
